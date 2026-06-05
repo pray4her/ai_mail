@@ -1,0 +1,104 @@
+spring:
+  application:
+    name: AIMail
+
+  jackson:
+    # 设置日期格式
+    date-format: yyyy-MM-dd HH:mm:ss
+    # 将时间轴设置为非时间戳格式
+    serialization:
+      write-dates-as-timestamps: false
+    # 时区设置
+    time-zone: GMT+8
+
+  # 开启热部署
+  devtools:
+    restart:
+      enabled: false
+
+  # 数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/${database.name}?useUnicode=true&allowPublicKeyRetrieval=true&autoReconnect=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: 123456
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+
+database:
+  name: mail
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true # 开启自动驼峰映射
+  global-config:
+    db-config:
+      logic-delete-field: deleted  # 逻辑删除字段
+      logic-delete-value: 1        # 已删除值
+      logic-not-delete-value: 0    # 未删除值
+
+
+#  MinIO 配置
+minio:
+  endpoint: http://127.0.0.1:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: uploads
+
+
+# 邮件自动回复调度器配置
+mail:
+  auto-reply:
+    enabled: true # 是否启用自动回复
+  auto-process: #是否自动解析（包括解析文档）
+    enabled: true
+
+# RAG 混合检索配置
+rag:
+  hybrid:
+    use-elasticsearch: true  # 是否使用 ES (启用后优先使用 ES 检索)
+    vector-recall-size: 300  # 向量召回候选集大小
+    bm25-weight: 1.0         # BM25 分数权重 (关键词主导)
+    vector-weight: 0.2       # 向量分数权重 (语义微调)
+    min-score: 0.5           # 最终融合分数阈值
+    default-topk: 5          # 默认返回数量
+    default-min-score: 0.3
+
+# Elasticsearch 配置
+elasticsearch:
+  client:
+    host: localhost
+    port: 9200
+    scheme: http
+    username: elastic
+    password: ""
+  search:
+    kb-chunks-index: kb_chunks   # 知识库分片索引名
+    dimension: 2048        # 向量维度 (与 embedding API 保持一致)
+
+
+# 服务器配置
+server:
+  port: 8080
+
+
+# 日志配置
+logging:
+  level:
+    root: INFO               # 全局默认 INFO
+    com.github.mail: INFO     # 项目包业务日志
+    org.springframework: WARN # Spring 框架日志
+    org.mybatis: WARN         # MyBatis 日志
+    com.zaxxer.hikari: WARN   # HikariCP 日志
+
+security:
+  account:
+    allow-self-register-after-initialized: false
+    server-logout-enabled: false
+    jwt-expiration-days: 5
+    jwt-secret: ""
+    jwt-issuer: AIMail
+    min-password-length: 8

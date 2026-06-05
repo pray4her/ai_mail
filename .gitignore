@@ -1,0 +1,56 @@
+# Maven / Java build output
+target/
+**/target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.class
+
+# Logs and runtime output
+logs/
+**/logs/
+*.log
+
+# Local IDE and editor state
+.idea/
+.vscode/
+.cursor/
+.trae/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated/
+.sts4-cache/
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+*.bak
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+/config/config.json
+
+# Local development dependencies and data
+/dev/downloads/
+/dev/runtime/
+
+# Local agent/spec assets
+/openspec/
+/.agents/
+/agent/
+/agents/
+/skills/
+
+# Maven wrapper binary cache, if generated locally
+.mvn/wrapper/maven-wrapper.jar

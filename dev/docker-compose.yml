@@ -1,0 +1,62 @@
+services:
+  mysql:
+    image: mysql:8.3.0
+    container_name: ai-mail-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: "mail"
+      TZ: "Asia/Shanghai"
+    ports:
+      - "3306:3306"
+    volumes:
+      - ai-mail-mysql-data:/var/lib/mysql
+      - ../mail.sql:/docker-entrypoint-initdb.d/02-mail.sql:ro
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_0900_ai_ci"
+      - "--default-time-zone=+08:00"
+
+  minio:
+    image: minio/minio:latest
+    container_name: ai-mail-minio
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ai-mail-minio-data:/data
+    command: ["server", "/data", "--console-address", ":9001"]
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: ai-mail-minio-init
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done; mc mb -p local/uploads || true; exit 0"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: ai-mail-es
+    environment:
+      discovery.type: "single-node"
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - ai-mail-es-data:/usr/share/elasticsearch/data
+    command:
+      - bash
+      - -c
+      - "if [ ! -d plugins/analysis-ik ]; then bin/elasticsearch-plugin install --batch https://get.infini.cloud/elasticsearch/analysis-ik/8.11.0; fi; exec /usr/local/bin/docker-entrypoint.sh"
+
+volumes:
+  ai-mail-mysql-data:
+  ai-mail-minio-data:
+  ai-mail-es-data:
