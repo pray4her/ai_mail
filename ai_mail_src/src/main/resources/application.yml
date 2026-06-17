@@ -67,6 +67,12 @@ rag:
     default-topk: 5          # 默认返回数量
     default-min-score: 0.3
 
+# 百炼 SDK 静态配置（密钥在 config.json）
+bailian:
+  endpoint: bailian.cn-beijing.aliyuncs.com
+  connect-timeout-ms: 30000
+  read-timeout-ms: 60000
+
 # Elasticsearch 配置
 elasticsearch:
   client:

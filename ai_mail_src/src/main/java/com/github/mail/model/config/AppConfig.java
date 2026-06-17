@@ -29,4 +29,9 @@ public class AppConfig {
      */
     private EmbeddingConfig embedding = new EmbeddingConfig();
 
+    /**
+     * 百炼知识库配置
+     */
+    private BailianConfig bailian = new BailianConfig();
+
 }

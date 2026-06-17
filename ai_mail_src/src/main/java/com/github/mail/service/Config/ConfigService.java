@@ -1,6 +1,7 @@
 package com.github.mail.service.Config;
 
 import com.github.mail.model.config.AppConfig;
+import com.github.mail.model.config.BailianConfig;
 import com.github.mail.model.config.MailConfig;
 import com.github.mail.model.config.DeepSeekConfig;
 import com.github.mail.model.config.EmbeddingConfig;
@@ -61,7 +62,8 @@ public class ConfigService {
         // 校验Embedding配置
         validateEmbeddingConfig(config.getEmbedding());
 
-        
+        validateBailianConfig(config.getMail(), config.getBailian());
+
         log.info("配置校验通过");
     }
     
@@ -126,6 +128,13 @@ public class ConfigService {
             // RAG配置在MailConfig层级，不在AutoReply内部
             MailConfig.Rag rag = mailConfig.getRag();
             if (rag != null) {
+                if (isEmpty(rag.getProvider())) {
+                    throw new IllegalArgumentException("RAG provider 不能为空");
+                }
+                String provider = rag.getProvider().trim().toLowerCase();
+                if (!"local".equals(provider) && !"bailian".equals(provider)) {
+                    throw new IllegalArgumentException("RAG provider 仅支持 local 或 bailian");
+                }
                 if (rag.getTopK() <= 0) {
                     throw new IllegalArgumentException("TopK应大于0");
                 }
@@ -133,6 +142,33 @@ public class ConfigService {
                     throw new IllegalArgumentException("最小分数应在0-1范围内");
                 }
             }
+        }
+    }
+
+    private void validateBailianConfig(MailConfig mailConfig, BailianConfig bailianConfig) {
+        if (mailConfig == null || mailConfig.getRag() == null) {
+            return;
+        }
+        if (!"bailian".equalsIgnoreCase(mailConfig.getRag().getProvider())) {
+            return;
+        }
+        if (bailianConfig == null) {
+            throw new IllegalArgumentException("百炼配置不能为空");
+        }
+        if (isEmpty(bailianConfig.getAccessKeyId())) {
+            throw new IllegalArgumentException("百炼 AccessKeyId 不能为空");
+        }
+        if (isEmpty(bailianConfig.getAccessKeySecret())) {
+            throw new IllegalArgumentException("百炼 AccessKeySecret 不能为空");
+        }
+        if (isEmpty(bailianConfig.getWorkspaceId())) {
+            throw new IllegalArgumentException("百炼 workspaceId 不能为空");
+        }
+        if (isEmpty(bailianConfig.getIndexId())) {
+            throw new IllegalArgumentException("百炼 indexId 不能为空");
+        }
+        if (isEmpty(bailianConfig.getEndpoint())) {
+            throw new IllegalArgumentException("百炼 endpoint 不能为空");
         }
     }
     

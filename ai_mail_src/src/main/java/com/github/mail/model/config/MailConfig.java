@@ -127,6 +127,11 @@ public class MailConfig {
     @Data
     public static class Rag {
         /**
+         * 检索来源：local（本地 ES）| bailian（百炼知识库）
+         */
+        private String provider = "local";
+
+        /**
          * TopK数量
          */
         private int topK = 5;
