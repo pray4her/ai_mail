@@ -9,11 +9,21 @@ public record AiGenerationRequest(
         String providerId,
         String userQuery,
         List<RagChunk> ragChunks,
-        Map<String, Object> traceMetadata
+        List<AiInputAttachment> attachments,
+        Map<String, Object> traceMetadata,
+        boolean useNativeAttachments
 ) {
 
     public AiGenerationRequest {
         ragChunks = ragChunks == null ? List.of() : List.copyOf(ragChunks);
+        attachments = attachments == null ? List.of() : List.copyOf(attachments);
         traceMetadata = traceMetadata == null ? Map.of() : Map.copyOf(traceMetadata);
+    }
+
+    public AiGenerationRequest(String providerId,
+                               String userQuery,
+                               List<RagChunk> ragChunks,
+                               Map<String, Object> traceMetadata) {
+        this(providerId, userQuery, ragChunks, List.of(), traceMetadata, false);
     }
 }

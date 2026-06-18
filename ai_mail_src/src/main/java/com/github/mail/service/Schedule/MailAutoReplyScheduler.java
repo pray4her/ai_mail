@@ -6,7 +6,9 @@ import com.github.mail.repo.Mail.dto.MailRaw;
 import com.github.mail.service.Fetcher.MailFetchService;
 import com.github.mail.service.KnowledgeBase.RagService;
 import com.github.mail.service.MailOperation.MailSendService;
+import com.github.mail.service.Persistence.MailPersistenceService;
 import com.github.mail.service.ai.AiGenerationRequest;
+import com.github.mail.service.ai.AiInputAttachment;
 import com.github.mail.service.ai.AiGenerationResult;
 import com.github.mail.service.ai.AiGenerationService;
 import com.github.mail.utils.TikaDocumentParser;
@@ -17,6 +19,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,6 +46,7 @@ public class MailAutoReplyScheduler {
     private final RagService ragService;
     private final AiGenerationService aiGenerationService;
     private final MailSendService mailSendService;
+    private final MailPersistenceService mailPersistenceService;
     private final TikaDocumentParser tikaDocumentParser;
     private final MailConfig mailConfig;
 
@@ -190,7 +194,7 @@ public class MailAutoReplyScheduler {
         try {
             // 批量提取用户查询
             List<String> userQueries = fetchMails.stream()
-                    .map(mail -> tikaDocumentParser.getEffectiveText(mail.getTextBody(), mail.getHtmlBody()))
+                    .map(this::buildUserQuery)
                     .toList();
 
             // 批量 RAG 检索（优化：一次性embedding调用）
@@ -215,25 +219,38 @@ public class MailAutoReplyScheduler {
                                   List<RagChunk> relevantChunks,
                                   int index,
                                   MailConfig.Imap imapConfig) {
+        Long mailMessageId = null;
         try {
             log.info("---------- 邮件 #{} 开始生成 ----------", index);
             log.info("发件人: {}, 主题: {}", mail.getFrom(), mail.getSubject());
             log.info("检索到 {} 个相关知识片段", relevantChunks.size());
 
+            Long accountId = mailPersistenceService.findAccountId(imapConfig)
+                    .orElseThrow(() -> new IllegalStateException("未找到邮件账户记录: " + imapConfig.getUsername()));
+            MailPersistenceService.PersistenceResult persistenceResult =
+                    mailPersistenceService.persistEmail(mail, accountId);
+            mailMessageId = persistenceResult.getMessageId();
+            List<AiInputAttachment> attachments = mailMessageId == null
+                    ? List.of()
+                    : mailPersistenceService.loadGenerationAttachments(mailMessageId);
+
+            Map<String, Object> traceMetadata = new LinkedHashMap<>();
+            traceMetadata.put("entrypoint", "scheduler");
+            traceMetadata.put("messageId", mail.getMessageId() == null ? "" : mail.getMessageId());
+            traceMetadata.put("mailMessageId", mailMessageId == null ? "" : mailMessageId);
+            traceMetadata.put("attachmentCount", attachments.size());
+            traceMetadata.put("hasAttachments", !attachments.isEmpty());
+
             AiGenerationResult generationResult = aiGenerationService.generate(new AiGenerationRequest(
                     null,
                     userQuery,
                     relevantChunks,
-                    Map.of(
-                            "entrypoint", "scheduler",
-                            "messageId", mail.getMessageId() == null ? "" : mail.getMessageId(),
-                            "subject", mail.getSubject() == null ? "" : mail.getSubject(),
-                            "from", mail.getFrom() == null ? "" : mail.getFrom()
-                    )
+                    attachments,
+                    traceMetadata,
+                    !attachments.isEmpty()
             ));
             String aiReplyContent = generationResult.content();
 
-            // 保存为草稿到配置的文件夹
             mailSendService.saveDraftToFolder(
                     mail.getFrom(),
                     mail.getSubject(),
@@ -241,12 +258,28 @@ public class MailAutoReplyScheduler {
                     draftFolder(),
                     imapConfig
             );
+            if (mailMessageId != null) {
+                mailPersistenceService.markReplyDraftSaved(mailMessageId, draftFolder(), aiReplyContent);
+            }
 
             log.info("邮件 #{} 回复生成成功并保存至草稿", index);
 
         } catch (Exception e) {
+            mailPersistenceService.markReplyFailed(mailMessageId, e.getMessage());
             log.error("邮件 #{} 处理失败, MessageID={}", index, mail.getMessageId(), e);
         }
+    }
+
+    private String buildUserQuery(MailRaw mail) {
+        String effectiveBody = tikaDocumentParser.getEffectiveText(mail.getTextBody(), mail.getHtmlBody());
+        String subject = mail.getSubject();
+        if (subject == null || subject.isBlank()) {
+            return effectiveBody;
+        }
+        if (effectiveBody == null || effectiveBody.isBlank()) {
+            return "主题: " + subject;
+        }
+        return "主题: " + subject + "\n正文: " + effectiveBody;
     }
 
     /**

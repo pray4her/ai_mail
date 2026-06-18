@@ -6,6 +6,7 @@ import com.github.mail.repo.Mail.dto.MailRaw;
 import com.github.mail.service.Fetcher.MailFetchService;
 import com.github.mail.service.KnowledgeBase.RagService;
 import com.github.mail.service.MailOperation.MailSendService;
+import com.github.mail.service.Persistence.MailPersistenceService;
 import com.github.mail.service.ai.AiGenerationRequest;
 import com.github.mail.service.ai.AiGenerationResult;
 import com.github.mail.service.ai.AiGenerationService;
@@ -28,6 +29,7 @@ class MailAutoReplySchedulerTest {
         RagService ragService = mock(RagService.class);
         AiGenerationService aiGenerationService = mock(AiGenerationService.class);
         MailSendService mailSendService = mock(MailSendService.class);
+        MailPersistenceService mailPersistenceService = mock(MailPersistenceService.class);
         TikaDocumentParser tikaDocumentParser = mock(TikaDocumentParser.class);
 
         MailConfig mailConfig = new MailConfig();
@@ -51,8 +53,12 @@ class MailAutoReplySchedulerTest {
 
         when(mailFetchService.fetchToAiReply(imap)).thenReturn(List.of(mailRaw));
         when(tikaDocumentParser.getEffectiveText("正文", null)).thenReturn("请介绍合作方式");
-        when(ragService.batchRetrieveRagChunks(List.of("请介绍合作方式"), 5, 0.3))
+        when(ragService.batchRetrieveRagChunks(List.of("主题: 咨询合作\n正文: 请介绍合作方式"), 5, 0.3))
                 .thenReturn(List.of(List.of(new RagChunk("合作知识", 0.9, "1"))));
+        when(mailPersistenceService.findAccountId(imap)).thenReturn(java.util.Optional.of(1L));
+        when(mailPersistenceService.persistEmail(mailRaw, 1L))
+                .thenReturn(MailPersistenceService.PersistenceResult.success(11L));
+        when(mailPersistenceService.loadGenerationAttachments(11L)).thenReturn(List.of());
         when(aiGenerationService.generate(any(AiGenerationRequest.class)))
                 .thenReturn(new AiGenerationResult("这是 AI 回复", "default", "chat-model", null, null, null, null, "trace-1"));
 
@@ -61,6 +67,7 @@ class MailAutoReplySchedulerTest {
                 ragService,
                 aiGenerationService,
                 mailSendService,
+                mailPersistenceService,
                 tikaDocumentParser,
                 mailConfig
         );

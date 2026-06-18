@@ -41,5 +41,9 @@ public class MailRaw {
 
     /** 是否包含附件，对应 MailMessage.hasAttachment（1 表示有附件，0 表示无附件） */
     private boolean hasAttachment;
+
+    private int attachmentCount;
+
+    private List<MailRawAttachment> attachments;
 }
 

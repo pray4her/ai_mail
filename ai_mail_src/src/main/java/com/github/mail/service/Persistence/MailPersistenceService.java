@@ -1,9 +1,15 @@
 package com.github.mail.service.Persistence;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.github.mail.model.config.MailConfig;
+import com.github.mail.model.config.Properties.MailServerProperties;
 import com.github.mail.repo.Mail.domain.*;
 import com.github.mail.repo.Mail.dto.MailRaw;
+import com.github.mail.repo.Mail.dto.MailRawAttachment;
 import com.github.mail.repo.Mail.mapper.*;
+import com.github.mail.service.File.MinioStorageService;
+import com.github.mail.service.ai.AiInputAttachment;
+import com.github.mail.utils.TikaDocumentParser;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +17,7 @@ import org.jsoup.Jsoup;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -38,8 +45,14 @@ import java.util.*;
 @RequiredArgsConstructor
 public class MailPersistenceService {
 
+    private static final String STORAGE_TYPE_MINIO = "MINIO";
+
     private final MailMessageMapper mailMessageMapper;
+    private final MailAttachmentMapper mailAttachmentMapper;
     private final MailProcessingRecordMapper processingRecordMapper;
+    private final MailAccountMapper mailAccountMapper;
+    private final MinioStorageService minioStorageService;
+    private final TikaDocumentParser tikaDocumentParser;
 
     /**
      * 单个邮件的幂等入库
@@ -57,42 +70,24 @@ public class MailPersistenceService {
     @Transactional(rollbackFor = Exception.class)
     public PersistenceResult persistEmail(MailRaw mailRaw, Long accountId) {
         try {
-            long startTime = System.currentTimeMillis();
-
-            // 1. 检查邮件是否已存在（使用 message_id，主要幂等性保证）
-            if (messageExists(accountId, mailRaw.getMessageId())) {
-//                logOperation(accountId, null, "FETCH", "DUPLICATE", 0, null,
-//                        "Message already exists");
-                return PersistenceResult.duplicate("Message already exists: " + mailRaw.getMessageId());
+            MailMessage existingMessage = findExistingMessage(accountId, mailRaw.getMessageId());
+            if (existingMessage != null) {
+                return PersistenceResult.duplicate(existingMessage.getId(), "Message already exists: " + mailRaw.getMessageId());
             }
 
-            // 2. 解析邮件为实体
             MailMessage message = convertToMailMessage(mailRaw, accountId);
-
-            // 3. 插入邮件主记录
             mailMessageMapper.insert(message);
             log.info("Persisted mail message: {} from {} with id {}",
                     message.getSubject(), message.getFromEmail(), message.getId());
 
-            // 4. 插入附件（若有，暂不支持 - 待 MailRaw 扩展）
-            // TODO: 当 MailRaw 支持附件时再实现
+            persistAttachments(mailRaw, message);
 
-            // 5. 创建处理记录
-            MailProcessingRecord processingRecord = createInitialProcessingRecord(
-                    message, accountId
-            );
+            MailProcessingRecord processingRecord = createInitialProcessingRecord(message, accountId);
             processingRecordMapper.insert(processingRecord);
 
-            // 6. 记录成功日志 暂不记录日志
-//            long duration = System.currentTimeMillis() - startTime;
-//            logOperation(accountId, message.getId(), "PERSIST", "SUCCESS", duration,
-//                    null, null);
-
             return PersistenceResult.success(message.getId());
-
         } catch (Exception e) {
             log.error("Failed to persist email: {}", mailRaw.getMessageId(), e);
-            // 异常会自动触发事务回滚
             throw new RuntimeException("Email persistence failed", e);
         }
     }
@@ -135,13 +130,72 @@ public class MailPersistenceService {
     /**
      * 检查邮件是否已存在（通过 message_id）
      */
-    private boolean messageExists(Long accountId, String messageId) {
-        Long count = mailMessageMapper.selectCount(
+    public Optional<Long> findAccountId(MailConfig.Imap imapConfig) {
+        MailServerProperties.Imap properties = MailServerProperties.fromMailConfig(imapConfig);
+        MailAccount account = mailAccountMapper.selectOne(
+                Wrappers.lambdaQuery(MailAccount.class)
+                        .eq(MailAccount::getEmail, properties.getUserName())
+                        .eq(MailAccount::getImapHost, properties.getHost())
+                        .eq(MailAccount::getImapPort, properties.getPort())
+        );
+        return Optional.ofNullable(account).map(MailAccount::getId);
+    }
+
+    public List<AiInputAttachment> loadGenerationAttachments(Long mailMessageId) {
+        List<MailAttachment> attachments = mailAttachmentMapper.selectList(
+                Wrappers.lambdaQuery(MailAttachment.class)
+                        .eq(MailAttachment::getMailMessageId, mailMessageId)
+                        .orderByAsc(MailAttachment::getId)
+        );
+        return attachments.stream()
+                .map(this::toAiInputAttachment)
+                .toList();
+    }
+
+    public void markReplyDraftSaved(Long mailMessageId, String draftFolder, String replyContent) {
+        MailProcessingRecord record = latestRecord(mailMessageId);
+        if (record == null) {
+            return;
+        }
+        record.setReplyStatus("DRAFT");
+        record.setReplyDraftFolder(draftFolder);
+        record.setReplyContent(replyContent);
+        record.setProcessedAt(LocalDateTime.now());
+        record.setUpdatedAt(LocalDateTime.now());
+        processingRecordMapper.updateById(record);
+    }
+
+    public void markReplyFailed(Long mailMessageId, String errorMessage) {
+        if (mailMessageId == null) {
+            return;
+        }
+        MailProcessingRecord record = latestRecord(mailMessageId);
+        if (record == null) {
+            return;
+        }
+        record.setReplyStatus("FAILED");
+        record.setErrorMessage(errorMessage);
+        record.setProcessedAt(LocalDateTime.now());
+        record.setUpdatedAt(LocalDateTime.now());
+        processingRecordMapper.updateById(record);
+    }
+
+    private MailProcessingRecord latestRecord(Long mailMessageId) {
+        return processingRecordMapper.selectOne(
+                Wrappers.lambdaQuery(MailProcessingRecord.class)
+                        .eq(MailProcessingRecord::getMailMessageId, mailMessageId)
+                        .orderByDesc(MailProcessingRecord::getId)
+                        .last("limit 1")
+        );
+    }
+
+    private MailMessage findExistingMessage(Long accountId, String messageId) {
+        return mailMessageMapper.selectOne(
                 Wrappers.lambdaQuery(MailMessage.class)
                         .eq(MailMessage::getMailAccountId, accountId)
                         .eq(MailMessage::getMessageId, messageId)
+                        .last("limit 1")
         );
-        return count != null && count > 0;
     }
 
 
@@ -160,25 +214,110 @@ public class MailPersistenceService {
             message.setToEmails(mailRaw.getTo());
         }
 
-        String text = Jsoup.parse(mailRaw.getHtmlBody()).text();
-        // 分离 HTML 和纯文本
+        String text = mailRaw.getTextBody();
+        if ((text == null || text.isBlank()) && mailRaw.getHtmlBody() != null) {
+            text = Jsoup.parse(mailRaw.getHtmlBody()).text();
+        }
         message.setBodyHtml(mailRaw.getHtmlBody());
         message.setBodyText(text);
 
-        // 邮件元数据
         if (mailRaw.getSentDate() != null) {
             message.setSentAt(new java.sql.Timestamp(mailRaw.getSentDate().getTime()).toLocalDateTime());
         }
         message.setReceivedAt(LocalDateTime.now());
         message.setHasAttachment(mailRaw.isHasAttachment() ? 1 : 0);
-
-        // 线程 ID
+        message.setAttachmentCount(mailRaw.getAttachmentCount());
         message.setThreadId(mailRaw.getThreadId());
-
         message.setIsRead(0);
         message.setIsDeleted(0);
 
         return message;
+    }
+
+    private void persistAttachments(MailRaw mailRaw, MailMessage message) {
+        List<MailRawAttachment> attachments = mailRaw.getAttachments();
+        if (attachments == null || attachments.isEmpty()) {
+            return;
+        }
+
+        for (MailRawAttachment attachment : attachments) {
+            String storagePath = buildAttachmentStoragePath(message.getId(), attachment);
+            minioStorageService.uploadFile(storagePath, attachment.getBytes(), attachment.getContentType());
+            attachment.setStoragePath(storagePath);
+            attachment.setStorageType(STORAGE_TYPE_MINIO);
+            attachment.setFallbackExtractedText(extractFallbackText(attachment));
+
+            MailAttachment entity = new MailAttachment();
+            entity.setMailMessageId(message.getId());
+            entity.setFilename(attachment.getFilename());
+            entity.setContentType(attachment.getContentType());
+            entity.setContentLength(attachment.getSize());
+            entity.setContentHash(attachment.getContentHash());
+            entity.setStoragePath(storagePath);
+            entity.setStorageType(STORAGE_TYPE_MINIO);
+            entity.setIsDownloaded(1);
+            entity.setIsScanned(0);
+            entity.setCreatedAt(LocalDateTime.now());
+            mailAttachmentMapper.insert(entity);
+        }
+    }
+
+    private String buildAttachmentStoragePath(Long mailMessageId, MailRawAttachment attachment) {
+        String safeFilename = attachment.getFilename() == null || attachment.getFilename().isBlank()
+                ? "attachment.bin"
+                : attachment.getFilename().replaceAll("[\\\\/:*?\"<>|]+", "_");
+        return "mail-attachments/" + mailMessageId + "/" + attachment.getContentHash() + "-" + safeFilename;
+    }
+
+    private String extractFallbackText(MailRawAttachment attachment) {
+        if (!supportsTextFallback(attachment.getContentType(), attachment.getFilename())) {
+            return null;
+        }
+        try (ByteArrayInputStream inputStream = new ByteArrayInputStream(attachment.getBytes())) {
+            String extracted = tikaDocumentParser.extractText(inputStream, attachment.getFilename());
+            return extracted == null || extracted.isBlank() ? null : extracted;
+        } catch (Exception e) {
+            log.warn("Failed to extract attachment fallback text: {}", attachment.getFilename(), e);
+            return null;
+        }
+    }
+
+    private boolean supportsTextFallback(String contentType, String filename) {
+        String normalizedType = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+        if (normalizedType.startsWith("image/")) {
+            return false;
+        }
+        if (normalizedType.startsWith("text/")) {
+            return true;
+        }
+        if (normalizedType.equals("application/pdf")) {
+            return true;
+        }
+        String lowerFilename = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+        return lowerFilename.endsWith(".doc")
+                || lowerFilename.endsWith(".docx")
+                || lowerFilename.endsWith(".rtf")
+                || lowerFilename.endsWith(".txt");
+    }
+
+    private AiInputAttachment toAiInputAttachment(MailAttachment attachment) {
+        String fallbackExtractedText = null;
+        if (supportsTextFallback(attachment.getContentType(), attachment.getFilename())) {
+            byte[] bytes = minioStorageService.readBytes(attachment.getStoragePath());
+            try (ByteArrayInputStream inputStream = new ByteArrayInputStream(bytes)) {
+                fallbackExtractedText = tikaDocumentParser.extractText(inputStream, attachment.getFilename());
+            } catch (Exception e) {
+                log.warn("Failed to load attachment text from MinIO: {}", attachment.getStoragePath(), e);
+            }
+        }
+        return new AiInputAttachment(
+                attachment.getId(),
+                attachment.getFilename(),
+                attachment.getContentType(),
+                attachment.getStoragePath(),
+                attachment.getContentHash(),
+                fallbackExtractedText
+        );
     }
 
 
@@ -212,6 +351,10 @@ public class MailPersistenceService {
 
         public static PersistenceResult success(Long messageId) {
             return new PersistenceResult(true, false, messageId, null);
+        }
+
+        public static PersistenceResult duplicate(Long messageId, String reason) {
+            return new PersistenceResult(false, true, messageId, reason);
         }
 
         public static PersistenceResult duplicate(String reason) {

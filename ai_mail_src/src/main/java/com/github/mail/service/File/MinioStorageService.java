@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 /**
  * minio 存储服务
@@ -53,13 +54,17 @@ public class MinioStorageService {
      * 上传文件
      */
     public void uploadFile(String objectPath, byte[] fileBytes) {
+        uploadFile(objectPath, fileBytes, "application/octet-stream");
+    }
+
+    public void uploadFile(String objectPath, byte[] fileBytes, String contentType) {
         try (InputStream is = new ByteArrayInputStream(fileBytes)) {
             minioClient.putObject(
                     PutObjectArgs.builder()
                             .bucket(minioProperties.getBucket())
                             .object(objectPath)
                             .stream(is, fileBytes.length, -1)
-                            .contentType("application/octet-stream")
+                            .contentType(Objects.requireNonNullElse(contentType, "application/octet-stream"))
                             .build()
             );
         } catch (Exception e) {
@@ -72,16 +77,7 @@ public class MinioStorageService {
      * 读取文本
      */
     public String readText(String objectPath) {
-        try (InputStream is = minioClient.getObject(
-                GetObjectArgs.builder()
-                        .bucket(minioProperties.getBucket())
-                        .object(objectPath)
-                        .build()
-        )) {
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            throw new RuntimeException("从 MinIO 读取失败: " + objectPath, e);
-        }
+        return new String(readBytes(objectPath), StandardCharsets.UTF_8);
     }
 
     /**
@@ -113,6 +109,14 @@ public class MinioStorageService {
             );
         } catch (Exception e) {
             throw new RuntimeException("从 MinIO 下载失败: " + objectPath, e);
+        }
+    }
+
+    public byte[] readBytes(String objectPath) {
+        try (InputStream is = downloadFile(objectPath)) {
+            return is.readAllBytes();
+        } catch (Exception e) {
+            throw new RuntimeException("从 MinIO 读取字节失败: " + objectPath, e);
         }
     }
 

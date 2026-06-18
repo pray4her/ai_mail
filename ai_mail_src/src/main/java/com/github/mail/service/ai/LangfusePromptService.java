@@ -145,6 +145,9 @@ public class LangfusePromptService implements AiPromptService {
         String replyRules = String.valueOf(variables.get("replyRules"));
         String strategy = String.valueOf(variables.get("replyStrategy"));
         String userQuery = String.valueOf(variables.get("userQuery"));
+        String attachmentSummary = String.valueOf(variables.get("attachmentSummary"));
+        String nativeAttachmentHint = String.valueOf(variables.get("nativeAttachmentHint"));
+        String fallbackAttachmentText = String.valueOf(variables.get("fallbackAttachmentText"));
 
         String userTemplate = """
                 ## 回复要求
@@ -159,6 +162,15 @@ public class LangfusePromptService implements AiPromptService {
                 ## 用户邮件内容
                 {{userQuery}}
 
+                ## 附件概览
+                {{attachmentSummary}}
+
+                ## 附件处理方式
+                {{nativeAttachmentHint}}
+
+                ## 附件提取文本
+                {{fallbackAttachmentText}}
+
                 请根据上述内容生成一封专业、准确、礼貌的回复邮件。
                 """;
 
@@ -166,7 +178,10 @@ public class LangfusePromptService implements AiPromptService {
                 "replyRules", replyRules,
                 "replyStrategy", strategy,
                 "knowledgeContext", knowledgeContext,
-                "userQuery", userQuery
+                "userQuery", userQuery,
+                "attachmentSummary", attachmentSummary,
+                "nativeAttachmentHint", nativeAttachmentHint,
+                "fallbackAttachmentText", fallbackAttachmentText
         ));
 
         return new PreparedPrompt(
@@ -190,6 +205,11 @@ public class LangfusePromptService implements AiPromptService {
         variables.put("knowledgeContext", buildKnowledgeContext(request.ragChunks()));
         variables.put("userQuery", request.userQuery());
         variables.put("ragChunkCount", request.ragChunks().size());
+        variables.put("attachmentSummary", buildAttachmentSummary(request.attachments()));
+        variables.put("nativeAttachmentHint", request.useNativeAttachments()
+                ? "原始附件已随请求一并发送，请结合附件内容分析并生成回复。"
+                : "当前未发送原始附件；如果有附件提取文本，请结合下方提取文本理解附件内容。");
+        variables.put("fallbackAttachmentText", buildFallbackAttachmentText(request.attachments(), request.useNativeAttachments()));
         return variables;
     }
 
@@ -245,6 +265,45 @@ public class LangfusePromptService implements AiPromptService {
                     .append("\n\n");
         }
         return builder.toString().trim();
+    }
+
+    private String buildAttachmentSummary(List<AiInputAttachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return "（无附件）";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < attachments.size(); i++) {
+            AiInputAttachment attachment = attachments.get(i);
+            builder.append(i + 1)
+                    .append(". ")
+                    .append(attachment.filename())
+                    .append(" [")
+                    .append(attachment.mimeType())
+                    .append("]")
+                    .append('\n');
+        }
+        return builder.toString().trim();
+    }
+
+    private String buildFallbackAttachmentText(List<AiInputAttachment> attachments, boolean useNativeAttachments) {
+        if (useNativeAttachments || attachments == null || attachments.isEmpty()) {
+            return "（当前无需附加文本回退）";
+        }
+        StringBuilder builder = new StringBuilder();
+        int index = 1;
+        for (AiInputAttachment attachment : attachments) {
+            if (!attachment.hasFallbackExtractedText()) {
+                continue;
+            }
+            builder.append("[附件 ")
+                    .append(index++)
+                    .append("] ")
+                    .append(attachment.filename())
+                    .append('\n')
+                    .append(attachment.fallbackExtractedText())
+                    .append("\n\n");
+        }
+        return builder.isEmpty() ? "（附件无可提取文本）" : builder.toString().trim();
     }
 
     private List<Message> toSpringMessages(ChatPrompt prompt, Map<String, Object> variables) {

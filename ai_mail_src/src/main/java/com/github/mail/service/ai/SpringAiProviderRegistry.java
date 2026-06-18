@@ -97,6 +97,8 @@ public class SpringAiProviderRegistry implements ChatProviderRegistry {
                     provider.getBaseUrl(),
                     provider.getChatModel(),
                     provider.getEmbeddingModel(),
+                    openAiApi,
+                    chatOptionsBuilder.build(),
                     chatModel,
                     embeddingModel
             ));

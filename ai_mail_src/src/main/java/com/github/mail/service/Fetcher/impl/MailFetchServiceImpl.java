@@ -7,15 +7,19 @@ import com.github.mail.utils.MailConnectUtil;
 import com.github.mail.utils.MailIdUtil;
 import com.github.mail.model.config.Properties.MailServerProperties;
 import com.github.mail.repo.Mail.dto.MailRaw;
+import com.github.mail.repo.Mail.dto.MailRawAttachment;
 import com.github.mail.repo.Mail.domain.MailAccount;
 import com.github.mail.repo.Mail.mapper.MailAccountMapper;
 import com.github.mail.service.Fetcher.MailFetchService;
 import jakarta.mail.*;
 import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeUtility;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.net.URLConnection;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -30,6 +34,25 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class MailFetchServiceImpl implements MailFetchService {
+
+    private static final Map<String, String> MIME_TYPES_BY_EXTENSION = Map.ofEntries(
+            Map.entry("pdf", "application/pdf"),
+            Map.entry("doc", "application/msword"),
+            Map.entry("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            Map.entry("xls", "application/vnd.ms-excel"),
+            Map.entry("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            Map.entry("ppt", "application/vnd.ms-powerpoint"),
+            Map.entry("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+            Map.entry("rtf", "application/rtf"),
+            Map.entry("txt", "text/plain"),
+            Map.entry("csv", "text/csv"),
+            Map.entry("png", "image/png"),
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("gif", "image/gif"),
+            Map.entry("bmp", "image/bmp"),
+            Map.entry("webp", "image/webp")
+    );
 
 
     private final MailAccountMapper mailAccountMapper;
@@ -245,6 +268,7 @@ public class MailFetchServiceImpl implements MailFetchService {
     private MailRaw parseMessage(Message message) throws Exception {
 
         MailRaw mail = new MailRaw();
+        mail.setAttachments(new ArrayList<>());
 
         mail.setMessageId(getHeader(message, "Message-ID"));
         mail.setSubject(message.getSubject());
@@ -252,12 +276,19 @@ public class MailFetchServiceImpl implements MailFetchService {
 
         mail.setFrom(((InternetAddress) message.getFrom()[0]).getAddress());
 
-        mail.setTo(Arrays.stream(message.getRecipients(Message.RecipientType.TO))
-                .map(addr -> ((InternetAddress) addr).getAddress())
-                .toList()
-        );
+        Address[] recipients = message.getRecipients(Message.RecipientType.TO);
+        if (recipients != null) {
+            mail.setTo(Arrays.stream(recipients)
+                    .map(addr -> ((InternetAddress) addr).getAddress())
+                    .toList()
+            );
+        } else {
+            mail.setTo(List.of());
+        }
 
         extractContent(message, mail);
+        mail.setAttachmentCount(mail.getAttachments().size());
+        mail.setHasAttachment(!mail.getAttachments().isEmpty());
 
         return mail;
     }
@@ -273,6 +304,10 @@ public class MailFetchServiceImpl implements MailFetchService {
 
 
     private void extractContent(Part part, MailRaw mail) throws Exception {
+        if (isAttachmentPart(part)) {
+            mail.getAttachments().add(extractAttachment(part));
+            return;
+        }
 
         if (part.isMimeType("text/plain") && mail.getTextBody() == null) {
             mail.setTextBody(part.getContent().toString());
@@ -289,11 +324,103 @@ public class MailFetchServiceImpl implements MailFetchService {
             for (int i = 0; i < multipart.getCount(); i++) {
                 extractContent(multipart.getBodyPart(i), mail);
             }
+            return;
         }
 
-        if (Part.ATTACHMENT.equalsIgnoreCase(part.getDisposition())) {
-            mail.setHasAttachment(true);
+        if (part.isMimeType("message/rfc822") && part.getContent() instanceof Part nestedPart) {
+            extractContent(nestedPart, mail);
         }
+    }
+
+    private boolean isAttachmentPart(Part part) throws MessagingException {
+        String disposition = part.getDisposition();
+        if (Part.ATTACHMENT.equalsIgnoreCase(disposition) || Part.INLINE.equalsIgnoreCase(disposition)) {
+            return part.getFileName() != null;
+        }
+        return part.getFileName() != null && !part.isMimeType("text/plain") && !part.isMimeType("text/html");
+    }
+
+    private MailRawAttachment extractAttachment(Part part) throws Exception {
+        MailRawAttachment attachment = new MailRawAttachment();
+        byte[] bytes;
+        try (var inputStream = part.getInputStream()) {
+            bytes = inputStream.readAllBytes();
+        }
+
+        String filename = decodeMimeText(part.getFileName());
+        String contentType = resolveContentType(part, filename);
+        attachment.setFilename(filename == null || filename.isBlank() ? UUID.randomUUID() + ".bin" : filename);
+        attachment.setContentType(contentType);
+        attachment.setSize(bytes.length);
+        attachment.setBytes(bytes);
+        attachment.setContentHash(sha256Hex(bytes));
+        return attachment;
+    }
+
+    private String resolveContentType(Part part, String filename) throws MessagingException {
+        String normalizedRawType = normalizeMimeType(part.getContentType());
+        if (normalizedRawType != null && !normalizedRawType.isBlank() && !isGenericBinaryMimeType(normalizedRawType)) {
+            return normalizedRawType;
+        }
+        String inferred = inferContentTypeFromFilename(filename);
+        if (inferred != null && !inferred.isBlank()) {
+            return inferred;
+        }
+        return normalizedRawType == null || normalizedRawType.isBlank()
+                ? "application/octet-stream"
+                : normalizedRawType;
+    }
+
+    private String normalizeMimeType(String rawContentType) {
+        if (rawContentType == null || rawContentType.isBlank()) {
+            return null;
+        }
+        int separatorIndex = rawContentType.indexOf(';');
+        String mimeType = separatorIndex > 0 ? rawContentType.substring(0, separatorIndex) : rawContentType;
+        String normalized = mimeType.trim().toLowerCase(Locale.ROOT);
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    private boolean isGenericBinaryMimeType(String mimeType) {
+        return "application/octet-stream".equalsIgnoreCase(mimeType);
+    }
+
+    private String decodeMimeText(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        try {
+            return MimeUtility.decodeText(value);
+        } catch (Exception e) {
+            log.debug("Failed to decode MIME text, using raw value: {}", value, e);
+            return value;
+        }
+    }
+
+    private String inferContentTypeFromFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return null;
+        }
+        String inferred = URLConnection.guessContentTypeFromName(filename);
+        if (inferred != null && !inferred.isBlank()) {
+            return normalizeMimeType(inferred);
+        }
+        int extensionSeparator = filename.lastIndexOf('.');
+        if (extensionSeparator < 0 || extensionSeparator == filename.length() - 1) {
+            return null;
+        }
+        String extension = filename.substring(extensionSeparator + 1).toLowerCase(Locale.ROOT);
+        return MIME_TYPES_BY_EXTENSION.get(extension);
+    }
+
+    private String sha256Hex(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(bytes);
+        StringBuilder builder = new StringBuilder(hash.length * 2);
+        for (byte value : hash) {
+            builder.append(String.format("%02x", value));
+        }
+        return builder.toString();
     }
 
     private void updateUidConfig(MailServerProperties.Imap config, long uid, long uidValidity) {
