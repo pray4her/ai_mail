@@ -58,4 +58,7 @@ Thumbs.db
 .mvn/wrapper/maven-wrapper.jar
 
 # front source code
-ai_mail_front_src
+ai_mail_front_src/node_modules/
+ai_mail_front_src/.next/
+ai_mail_front_src/.vercel/
+ai_mail_front_src/.turbo/

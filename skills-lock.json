@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "skills/java-coding-standards/SKILL.md",
       "computedHash": "3d6574c4fc1bb4d4882d333aa4d643fc5e42d696af1987c5fe44eb1e3dfffca6"
+    },
+    "nextjs-best-practices": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/nextjs-best-practices/SKILL.md",
+      "computedHash": "3c40a7ea604cdbee772bd7b3efe59aafd6fedf62252a76d43b9f835a6adc92cd"
     }
   }
 }

@@ -18,39 +18,6 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
--- Table structure for ai_reply_rule
--- ----------------------------
-DROP TABLE IF EXISTS `ai_reply_rule`;
-CREATE TABLE `ai_reply_rule`  (
-  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `rule_order` int NOT NULL COMMENT '规则顺序',
-  `rule_text` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '规则文本',
-  `enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用（1=启用，0=禁用）',
-  `version` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '版本号',
-  `updated_by` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '更新人',
-  `is_core` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否核心规则（不可删除）',
-  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `uk_rule_order_version`(`rule_order` ASC, `version` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 26 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'AI 回复规则表' ROW_FORMAT = Dynamic;
-
--- ----------------------------
--- Table structure for ai_reply_strategy
--- ----------------------------
-DROP TABLE IF EXISTS `ai_reply_strategy`;
-CREATE TABLE `ai_reply_strategy`  (
-  `id` bigint UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `tone` enum('professional','friendly','firm') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '语气',
-  `length` enum('short','medium','detailed') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '长度',
-  `include_steps` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否包含步骤（1=包含，0=不包含）',
-  `extra_instruction` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '补充说明',
-  `created_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 5 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'AI 回复策略表' ROW_FORMAT = Dynamic;
-
--- ----------------------------
 -- Table structure for kb_document
 -- ----------------------------
 DROP TABLE IF EXISTS `kb_document`;

@@ -21,7 +21,7 @@ public class AppAiProperties {
     private String defaultEmbeddingProvider = "default";
 
     @NotBlank
-    private String fallbackSystemPrompt = "你是一个专业的邮件回复助手。请基于规则、策略、知识库上下文和用户邮件内容生成专业、准确、礼貌的回复。";
+    private String fallbackSystemPrompt = "你是一个专业的邮件回复助手。请基于知识库上下文、用户邮件内容和附件信息生成专业、准确、礼貌的回复。";
 
     @Valid
     private Map<String, Provider> providers = new LinkedHashMap<>();
