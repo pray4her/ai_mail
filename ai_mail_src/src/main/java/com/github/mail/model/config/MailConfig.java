@@ -1,6 +1,8 @@
 package com.github.mail.model.config;
 
 import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +15,8 @@ import java.util.List;
  * @date 2026/01/06
  */
 @Data
+@Validated
+@ConfigurationProperties(prefix = "app.mail")
 public class MailConfig {
     
     /**

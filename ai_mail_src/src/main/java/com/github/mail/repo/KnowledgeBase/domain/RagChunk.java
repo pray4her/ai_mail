@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 /**
- * 用于交给PromptBuilder生成提示词
+ * RAG 检索返回的统一知识片段
  *
  * @author Aster
  * @date 2025/12/30

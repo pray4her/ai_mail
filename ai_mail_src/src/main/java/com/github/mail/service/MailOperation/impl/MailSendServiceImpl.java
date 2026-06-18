@@ -2,7 +2,6 @@ package com.github.mail.service.MailOperation.impl;
 
 import com.github.mail.model.config.MailConfig;
 import com.github.mail.model.config.Properties.MailServerProperties;
-import com.github.mail.service.Config.ConfigService;
 import com.github.mail.service.MailOperation.MailSendService;
 import com.github.mail.utils.MailConnectUtil;
 import jakarta.mail.*;

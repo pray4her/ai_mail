@@ -1,12 +1,8 @@
 package com.github.mail.service.KnowledgeBase;
 
-import com.github.mail.model.config.AppConfig;
 import com.github.mail.model.config.MailConfig;
 import com.github.mail.model.config.Properties.RagProperties;
 import com.github.mail.repo.KnowledgeBase.domain.RagChunk;
-import com.github.mail.service.Config.ConfigService;
-import com.github.mail.service.KnowledgeBase.impl.BailianKnowledgeRetrievalProvider;
-import com.github.mail.service.KnowledgeBase.impl.LocalEsKnowledgeRetrievalProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,31 +27,36 @@ import static org.mockito.Mockito.when;
 class RagServiceProviderRoutingTest {
 
     @Mock
-    private LocalEsKnowledgeRetrievalProvider localProvider;
+    private KnowledgeRetrievalProvider localProvider;
 
     @Mock
-    private BailianKnowledgeRetrievalProvider bailianProvider;
-
-    @Mock
-    private ConfigService configService;
+    private KnowledgeRetrievalProvider bailianProvider;
 
     @Mock
     private RagProperties ragProperties;
 
+    private MailConfig mailConfig;
+
     @InjectMocks
     private RagService ragService;
 
-    private AppConfig appConfig;
-
     @BeforeEach
     void setUp() {
-        appConfig = new AppConfig();
+        mailConfig = new MailConfig();
+        ragService = new RagService(
+                java.util.Map.of(
+                        "localEsKnowledgeRetrievalProvider", localProvider,
+                        "bailianKnowledgeRetrievalProvider", bailianProvider
+                ),
+                mailConfig,
+                ragProperties
+        );
     }
+
 
     @Test
     void retrieveRagChunks_routesToLocalProvider() {
-        when(configService.getConfig()).thenReturn(appConfig);
-        appConfig.getMail().getRag().setProvider("local");
+        mailConfig.getRag().setProvider("local");
         List<RagChunk> expected = List.of(new RagChunk("local-chunk", 0.9, "1"));
         when(localProvider.retrieve("query", 5, 0.3)).thenReturn(expected);
 
@@ -68,8 +69,7 @@ class RagServiceProviderRoutingTest {
 
     @Test
     void retrieveRagChunks_routesToBailianProvider() {
-        when(configService.getConfig()).thenReturn(appConfig);
-        appConfig.getMail().getRag().setProvider("bailian");
+        mailConfig.getRag().setProvider("bailian");
         List<RagChunk> expected = List.of(new RagChunk("bailian-chunk", 0.8, "b-1"));
         when(bailianProvider.retrieve("query", 3, 0.2)).thenReturn(expected);
 
@@ -82,8 +82,7 @@ class RagServiceProviderRoutingTest {
 
     @Test
     void batchRetrieveRagChunks_routesToBailianProvider() {
-        when(configService.getConfig()).thenReturn(appConfig);
-        appConfig.getMail().getRag().setProvider("bailian");
+        mailConfig.getRag().setProvider("bailian");
         List<String> queries = List.of("q1", "q2");
         List<List<RagChunk>> expected = List.of(
                 List.of(new RagChunk("a", 0.7, "1")),

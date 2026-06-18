@@ -41,18 +41,45 @@ public class ElasticsearchClientConfig {
 
     @Bean
     public ElasticsearchClient elasticsearchClient() throws Exception {
-
-
         String password = elasticsearchClientProperties.getPassword();
         String username = elasticsearchClientProperties.getUsername();
         String host = elasticsearchClientProperties.getHost();
         int port = elasticsearchClientProperties.getPort();
         String scheme = elasticsearchClientProperties.getScheme();
 
-        //配置ssl
-        //此处使用resource加载证书 TODO: 如果是使用新的ES需修改证书及https密码
-        ClassPathResource resource = new ClassPathResource("es/http_ca.crt");
+        // 配置认证
+        BasicCredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+        if (password != null && !password.isEmpty()) {
+            credentialsProvider.setCredentials(
+                    AuthScope.ANY,
+                    new UsernamePasswordCredentials(username, password)
+            );
+        }
+        SSLContext sslContext = "https".equalsIgnoreCase(scheme) ? buildSslContext() : null;
 
+        // 创建 RestClient
+        RestClient restClient = RestClient.builder(
+                        new HttpHost(host, port, scheme))
+                .setHttpClientConfigCallback(httpClientBuilder -> {
+                    httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider);
+                    if (sslContext != null) {
+                        httpClientBuilder.setSSLContext(sslContext);
+                    }
+                    return httpClientBuilder;
+                }).build();
+
+        // 创建 Transport
+        RestClientTransport transport = new RestClientTransport(
+                restClient,
+                new JacksonJsonpMapper()
+        );
+
+        // 创建 ElasticsearchClient
+        return new ElasticsearchClient(transport);
+    }
+
+    private SSLContext buildSslContext() throws Exception {
+        ClassPathResource resource = new ClassPathResource("es/http_ca.crt");
         CertificateFactory factory = CertificateFactory.getInstance("X.509");
         Certificate trustedCa;
         try (InputStream is = resource.getInputStream()) {
@@ -65,34 +92,6 @@ public class ElasticsearchClientConfig {
 
         SSLContextBuilder sslContextBuilder = SSLContexts.custom()
                 .loadTrustMaterial(trustStore, null);
-
-        final SSLContext sslContext = sslContextBuilder.build();
-
-        // 配置认证
-        BasicCredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-        if (password != null && !password.isEmpty()) {
-            credentialsProvider.setCredentials(
-                    AuthScope.ANY,
-                    new UsernamePasswordCredentials(username, password)
-            );
-        }
-
-        // 创建 RestClient
-        RestClient restClient = RestClient.builder(
-                        new HttpHost(host, port, scheme))
-                .setHttpClientConfigCallback(httpClientBuilder -> {
-                    httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider);
-                    httpClientBuilder.setSSLContext(sslContext);
-                    return httpClientBuilder;
-                }).build();
-
-        // 创建 Transport
-        RestClientTransport transport = new RestClientTransport(
-                restClient,
-                new JacksonJsonpMapper()
-        );
-
-        // 创建 ElasticsearchClient
-        return new ElasticsearchClient(transport);
+        return sslContextBuilder.build();
     }
 }

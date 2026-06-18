@@ -3,7 +3,6 @@ package com.github.mail.service.Fetcher.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.github.mail.model.config.MailConfig;
-import com.github.mail.service.Config.ConfigService;
 import com.github.mail.utils.MailConnectUtil;
 import com.github.mail.utils.MailIdUtil;
 import com.github.mail.model.config.Properties.MailServerProperties;

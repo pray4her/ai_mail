@@ -1,10 +1,10 @@
 package com.github.mail.service.KnowledgeBase.impl;
 
-import com.github.mail.client.EmbeddingClient;
 import com.github.mail.model.config.Properties.RagProperties;
 import com.github.mail.repo.KnowledgeBase.domain.RagChunk;
 import com.github.mail.service.KnowledgeBase.KnowledgeRetrievalProvider;
 import com.github.mail.service.Search.ElasticsearchHybridService;
+import com.github.mail.service.ai.AiEmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 public class LocalEsKnowledgeRetrievalProvider implements KnowledgeRetrievalProvider {
 
     private final ElasticsearchHybridService esHybridService;
-    private final EmbeddingClient embeddingClient;
+    private final AiEmbeddingService embeddingService;
     private final RagProperties ragProperties;
 
     @Override
@@ -33,7 +33,7 @@ public class LocalEsKnowledgeRetrievalProvider implements KnowledgeRetrievalProv
         if (query == null || query.isBlank()) {
             return Collections.emptyList();
         }
-        float[] embedding = embeddingClient.embed(query);
+        float[] embedding = embeddingService.embed(query);
         return doSearch(query, embedding, topK, minScore);
     }
 
@@ -44,7 +44,7 @@ public class LocalEsKnowledgeRetrievalProvider implements KnowledgeRetrievalProv
         }
 
         log.debug("本地 ES 批量 Embedding，条数: {}", queries.size());
-        List<float[]> embeddings = embeddingClient.embedBatch(queries);
+        List<float[]> embeddings = embeddingService.embedBatch(queries);
 
         List<List<RagChunk>> results = new ArrayList<>();
         for (int i = 0; i < queries.size(); i++) {

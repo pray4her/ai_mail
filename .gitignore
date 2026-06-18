@@ -40,6 +40,8 @@ Thumbs.db
 .env.*
 !.env.example
 /config/config.json
+/ai_mail_src/src/main/resources/application.yml
+/ai_mail_src/src/main/resources/application.yaml
 
 # Local development dependencies and data
 /dev/downloads/

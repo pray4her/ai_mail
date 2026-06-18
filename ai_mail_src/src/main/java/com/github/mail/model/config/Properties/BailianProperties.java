@@ -9,8 +9,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @author System
  */
 @Data
-@ConfigurationProperties(prefix = "bailian")
+@ConfigurationProperties(prefix = "app.rag.bailian")
 public class BailianProperties {
+
+    private String accessKeyId = "";
+
+    private String accessKeySecret = "";
+
+    private String workspaceId = "";
+
+    private String indexId = "";
 
     private String endpoint = "bailian.cn-beijing.aliyuncs.com";
 

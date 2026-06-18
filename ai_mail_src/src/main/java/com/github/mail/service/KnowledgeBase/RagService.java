@@ -1,16 +1,15 @@
 package com.github.mail.service.KnowledgeBase;
 
+import com.github.mail.model.config.MailConfig;
 import com.github.mail.model.config.Properties.RagProperties;
 import com.github.mail.repo.KnowledgeBase.domain.RagChunk;
-import com.github.mail.service.Config.ConfigService;
-import com.github.mail.service.KnowledgeBase.impl.BailianKnowledgeRetrievalProvider;
-import com.github.mail.service.KnowledgeBase.impl.LocalEsKnowledgeRetrievalProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * RAG 检索服务：按配置路由到本地 ES 或百炼知识库
@@ -23,10 +22,12 @@ import java.util.List;
 public class RagService {
 
     private static final String PROVIDER_BAILIAN = "bailian";
+    private static final String PROVIDER_LOCAL = "local";
+    private static final String LOCAL_PROVIDER_BEAN = "localEsKnowledgeRetrievalProvider";
+    private static final String BAILIAN_PROVIDER_BEAN = "bailianKnowledgeRetrievalProvider";
 
-    private final LocalEsKnowledgeRetrievalProvider localProvider;
-    private final BailianKnowledgeRetrievalProvider bailianProvider;
-    private final ConfigService configService;
+    private final Map<String, KnowledgeRetrievalProvider> providers;
+    private final MailConfig mailConfig;
     private final RagProperties ragProperties;
 
     public List<RagChunk> retrieveRagChunks(String queryText, int topK, double minScore) {
@@ -52,12 +53,23 @@ public class RagService {
     }
 
     private KnowledgeRetrievalProvider resolveProvider() {
-        String provider = configService.getConfig().getMail().getRag().getProvider();
+        String provider = mailConfig.getRag().getProvider();
         if (PROVIDER_BAILIAN.equalsIgnoreCase(provider)) {
             log.debug("RAG 检索使用百炼知识库");
-            return bailianProvider;
+            return getProvider(PROVIDER_BAILIAN);
         }
         log.debug("RAG 检索使用本地 ES");
-        return localProvider;
+        return getProvider(PROVIDER_LOCAL);
+    }
+
+    private KnowledgeRetrievalProvider getProvider(String providerKey) {
+        String beanName = PROVIDER_BAILIAN.equalsIgnoreCase(providerKey)
+                ? BAILIAN_PROVIDER_BEAN
+                : LOCAL_PROVIDER_BEAN;
+        KnowledgeRetrievalProvider provider = providers.get(beanName);
+        if (provider == null) {
+            throw new IllegalStateException("未找到 RAG Provider: " + providerKey);
+        }
+        return provider;
     }
 }

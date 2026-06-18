@@ -3,7 +3,6 @@ package com.github.mail.service.KnowledgeBase;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.mail.client.EmbeddingClient;
 import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.repo.KnowledgeBase.domain.KbDocumentChunk;
 import com.github.mail.repo.KnowledgeBase.domain.KbVectorIndex;
@@ -11,7 +10,7 @@ import com.github.mail.repo.KnowledgeBase.mapper.KbDocumentChunkMapper;
 import com.github.mail.repo.KbDocument.mapper.KbDocumentMapper;
 import com.github.mail.repo.KnowledgeBase.mapper.KbVectorIndexMapper;
 import com.github.mail.repo.KnowledgeBase.dao.ElasticsearchChunkIndexRepository;
-import com.github.mail.service.Config.ConfigService;
+import com.github.mail.service.ai.AiEmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,17 +47,15 @@ public class KbEmbeddingService {
     private final KbDocumentChunkMapper chunkMapper;
     private final KbVectorIndexMapper vectorIndexMapper;
     private final KbDocumentMapper documentMapper;
-    private final EmbeddingClient embeddingClient;
+    private final AiEmbeddingService embeddingService;
     private final ElasticsearchChunkIndexRepository esVectorService;
     private final ObjectMapper objectMapper;
-
-    private final ConfigService configService;
 
     /**
      * 获取当前使用的 embedding 模型
      */
     private String getCurrentModel() {
-        return configService.getConfig().getEmbedding().getAli().getModel();
+        return embeddingService.currentModel();
     }
 
     /**
@@ -135,7 +132,7 @@ public class KbEmbeddingService {
                 .map(KbDocumentChunk::getTextContent)
                 .toList();
 
-        List<float[]> vectors = embeddingClient.embedBatch(chunkContent);
+        List<float[]> vectors = embeddingService.embedBatch(chunkContent);
 
         if (vectors == null || vectors.isEmpty() || vectors.size() != chunkContent.size()) {
             throw new RuntimeException("Embedding result is empty for chunk: ");
@@ -189,7 +186,7 @@ public class KbEmbeddingService {
         }
 
         // 第一步：调用 embedding API
-        float[] embedding = embeddingClient.embed(chunk.getTextContent());
+        float[] embedding = embeddingService.embed(chunk.getTextContent());
 
         if (embedding == null || embedding.length == 0) {
             throw new RuntimeException("Embedding result is empty for chunk: " + chunk.getId());

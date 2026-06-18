@@ -53,7 +53,7 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "mail.auto-process", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "app.mail.auto-process", name = "enabled", havingValue = "true")
 public class ProcessingScheduler {
 
     private final MailFetchService fetchService;

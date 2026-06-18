@@ -4,14 +4,12 @@ import com.github.mail.model.config.MailConfig;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.springframework.stereotype.Component;
 
 /**
  * 邮件服务器配置实体类
  * @author Asteries 作为映射保留
  */
 @Data
-@Component
 public class MailServerProperties {
 
     private Imap imap = new Imap();

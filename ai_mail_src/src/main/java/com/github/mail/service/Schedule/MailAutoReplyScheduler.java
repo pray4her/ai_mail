@@ -1,14 +1,14 @@
 package com.github.mail.service.Schedule;
 
-import com.github.mail.client.DeepSeekClient;
 import com.github.mail.model.config.MailConfig;
 import com.github.mail.repo.KnowledgeBase.domain.RagChunk;
 import com.github.mail.repo.Mail.dto.MailRaw;
-import com.github.mail.service.Config.ConfigService;
 import com.github.mail.service.Fetcher.MailFetchService;
 import com.github.mail.service.KnowledgeBase.RagService;
 import com.github.mail.service.MailOperation.MailSendService;
-import com.github.mail.service.Prompt.PromptBuilder;
+import com.github.mail.service.ai.AiGenerationRequest;
+import com.github.mail.service.ai.AiGenerationResult;
+import com.github.mail.service.ai.AiGenerationService;
 import com.github.mail.utils.TikaDocumentParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -35,22 +36,21 @@ import java.util.concurrent.atomic.AtomicLong;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "mail.auto-reply", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "app.mail.auto-reply", name = "enabled", havingValue = "true")
 public class MailAutoReplyScheduler {
 
     private final MailFetchService mailFetchService;
     private final RagService ragService;
-    private final PromptBuilder promptBuilder;
-    private final DeepSeekClient deepSeekClient;
+    private final AiGenerationService aiGenerationService;
     private final MailSendService mailSendService;
     private final TikaDocumentParser tikaDocumentParser;
-    private final ConfigService configService;
+    private final MailConfig mailConfig;
 
 
     // 从配置文件读取参数
 
     private MailConfig mail() {
-        return configService.getConfig().getMail();
+        return mailConfig;
     }
 
     private int intervalLevel1() {
@@ -112,7 +112,7 @@ public class MailAutoReplyScheduler {
 
 
             // 第一步：读取邮箱配置
-            List<MailConfig.Imap> imapList = configService.getConfig().getMail().getImapList();
+            List<MailConfig.Imap> imapList = mailConfig.getImapList();
 
             boolean hasAnyMail = false;
 
@@ -220,15 +220,18 @@ public class MailAutoReplyScheduler {
             log.info("发件人: {}, 主题: {}", mail.getFrom(), mail.getSubject());
             log.info("检索到 {} 个相关知识片段", relevantChunks.size());
 
-            // 构建 Prompt
-            String prompt = promptBuilder.buildPrompt(userQuery, relevantChunks);
-
-            // 调用 AI 接口生成回复
-            String aiReplyContent = deepSeekClient.generateTemplateByPrompt(prompt);
-
-            if ("失败".equals(aiReplyContent)) {
-                return;
-            }
+            AiGenerationResult generationResult = aiGenerationService.generate(new AiGenerationRequest(
+                    null,
+                    userQuery,
+                    relevantChunks,
+                    Map.of(
+                            "entrypoint", "scheduler",
+                            "messageId", mail.getMessageId() == null ? "" : mail.getMessageId(),
+                            "subject", mail.getSubject() == null ? "" : mail.getSubject(),
+                            "from", mail.getFrom() == null ? "" : mail.getFrom()
+                    )
+            ));
+            String aiReplyContent = generationResult.content();
 
             // 保存为草稿到配置的文件夹
             mailSendService.saveDraftToFolder(

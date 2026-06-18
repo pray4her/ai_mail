@@ -26,6 +26,8 @@
         <commons-io.version>2.18.0</commons-io.version>
         <okhttp.version>4.12.0</okhttp.version>
         <elasticsearch.version>8.11.0</elasticsearch.version>
+        <spring-ai.version>1.1.2</spring-ai.version>
+        <langfuse.version>0.2.0</langfuse.version>
     </properties>
 
     <dependencyManagement>
@@ -40,6 +42,13 @@
                 <artifactId>okhttp</artifactId>
                 <version>${okhttp.version}</version>
             </dependency>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -52,6 +61,16 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
         <dependency>
@@ -120,14 +139,8 @@
         </dependency>
 
         <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j</artifactId>
-            <version>0.35.0</version>
-        </dependency>
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-open-ai</artifactId>
-            <version>0.35.0</version>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
         <!-- Elasticsearch 依赖 -->
@@ -177,6 +190,19 @@
             <groupId>com.aliyun</groupId>
             <artifactId>bailian20231229</artifactId>
             <version>2.0.8</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.langfuse</groupId>
+            <artifactId>langfuse-java</artifactId>
+            <version>${langfuse.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>${okhttp.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

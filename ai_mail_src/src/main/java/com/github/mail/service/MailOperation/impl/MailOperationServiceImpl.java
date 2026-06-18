@@ -2,7 +2,6 @@ package com.github.mail.service.MailOperation.impl;
 
 import com.github.mail.model.config.MailConfig;
 import com.github.mail.model.config.Properties.MailServerProperties;
-import com.github.mail.service.Config.ConfigService;
 import com.github.mail.service.MailOperation.MailOperationService;
 import com.github.mail.utils.MailConnectUtil;
 import com.github.mail.utils.MailIdUtil;
@@ -26,7 +25,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MailOperationServiceImpl implements MailOperationService {
 
-    private final ConfigService configService;
+    private final MailConfig mailConfig;
 
 
     @Override
@@ -142,7 +141,7 @@ public class MailOperationServiceImpl implements MailOperationService {
 
 
         MailConfig.Imap imapConfig =
-                configService.getConfig().getMail().getImapList().get(0);
+                mailConfig.getImapList().get(0);
 
         MailServerProperties.Imap imapProperties =
                 MailServerProperties.fromMailConfig(imapConfig);

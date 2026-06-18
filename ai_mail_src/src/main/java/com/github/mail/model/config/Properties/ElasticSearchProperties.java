@@ -2,7 +2,6 @@ package com.github.mail.model.config.Properties;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
 /**
  * ES搜索配置（yml读取）
@@ -11,8 +10,7 @@ import org.springframework.stereotype.Component;
  */
 
 @Data
-@Component
-@ConfigurationProperties(prefix = "elasticsearch.search")
+@ConfigurationProperties(prefix = "app.elasticsearch.search")
 public class ElasticSearchProperties {
 
     // 知识库分片索引

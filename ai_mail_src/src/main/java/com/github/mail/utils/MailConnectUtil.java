@@ -33,7 +33,12 @@ public class MailConnectUtil {
         props.put("mail.imap.port", imapConfig.getPort());
         props.put("mail.imap.ssl.enable", "true");
         props.put("mail.imap.auth", "true");
-        props.put("mail.imap.starttls.enable", "true");
+        // 对于 993 隐式 SSL，关闭 STARTTLS 以避免协商歧义
+        props.put("mail.imap.starttls.enable", "false");
+        // 明确禁用 PLAIN，避免触发 “Not support PLAIN!”
+        props.put("mail.imap.auth.plain.disable", "true");
+        // 使用更通用的 LOGIN 机制，兼容 QQ 等邮箱的授权码登录
+        props.put("mail.imap.auth.mechanisms", "LOGIN");
         props.put("mail.imap.ssl.protocols", "TLSv1.2 TLSv1.3");
         props.put("mail.imap.ssl.trust", "*");
         props.put("mail.imap.idenable", "true");
