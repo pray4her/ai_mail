@@ -1,6 +1,7 @@
 package com.github.mail.service.Persistence;
 
 import com.github.mail.repo.Mail.domain.MailAttachment;
+import com.github.mail.repo.Mail.domain.MailAccount;
 import com.github.mail.repo.Mail.domain.MailMessage;
 import com.github.mail.repo.Mail.domain.MailProcessingRecord;
 import com.github.mail.repo.Mail.dto.MailRaw;
@@ -23,7 +24,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class MailPersistenceServiceTest {
@@ -89,5 +92,63 @@ class MailPersistenceServiceTest {
         verify(mailAttachmentMapper).insert(attachmentCaptor.capture());
         assertEquals("mail-attachments/101/hash-1-resume.pdf", attachmentCaptor.getValue().getStoragePath());
         verify(processingRecordMapper).insert(any(MailProcessingRecord.class));
+    }
+
+    @Test
+    void persistHistoryEmail_storesRemoteLinkWithoutProcessingRecordOrAttachmentDownload() {
+        MailMessageMapper mailMessageMapper = mock(MailMessageMapper.class);
+        MailAttachmentMapper mailAttachmentMapper = mock(MailAttachmentMapper.class);
+        MailProcessingRecordMapper processingRecordMapper = mock(MailProcessingRecordMapper.class);
+        MailAccountMapper mailAccountMapper = mock(MailAccountMapper.class);
+        MinioStorageService minioStorageService = mock(MinioStorageService.class);
+        TikaDocumentParser tikaDocumentParser = mock(TikaDocumentParser.class);
+
+        when(mailMessageMapper.selectOne(any())).thenReturn(null);
+        doAnswer(invocation -> {
+            MailMessage message = invocation.getArgument(0);
+            message.setId(102L);
+            return 1;
+        }).when(mailMessageMapper).insert(any(MailMessage.class));
+        MailAccount account = new MailAccount();
+        account.setId(1L);
+        account.setEmail("user@qq.com");
+        when(mailAccountMapper.selectById(1L)).thenReturn(account);
+
+        MailPersistenceService service = new MailPersistenceService(
+                mailMessageMapper,
+                mailAttachmentMapper,
+                processingRecordMapper,
+                mailAccountMapper,
+                minioStorageService,
+                tikaDocumentParser
+        );
+
+        MailRawAttachment remoteAttachment = new MailRawAttachment();
+        remoteAttachment.setFilename("large.zip");
+        remoteAttachment.setContentType("text/uri-list");
+        remoteAttachment.setAttachmentKind("REMOTE_LINK");
+        remoteAttachment.setExternalUrl("https://mail.qq.com/cgi-bin/ftnExs_download?k=abc");
+        remoteAttachment.setRemark("QQ 超大附件通常 30 天有效");
+
+        MailRaw mailRaw = new MailRaw();
+        mailRaw.setMessageId("mid-remote");
+        mailRaw.setSubject("超大附件");
+        mailRaw.setFrom("sender@qq.com");
+        mailRaw.setTo(List.of("user@qq.com"));
+        mailRaw.setRawMimeBytes("raw-eml".getBytes());
+        mailRaw.setHasAttachment(true);
+        mailRaw.setAttachmentCount(1);
+        mailRaw.setAttachments(List.of(remoteAttachment));
+
+        MailPersistenceService.PersistenceResult result = service.persistHistoryEmail(mailRaw, 1L);
+
+        assertTrue(result.isSuccess());
+        verify(minioStorageService).uploadFile(eq("mail-raw/102.eml"), any(byte[].class), eq("message/rfc822"));
+        verifyNoMoreInteractions(minioStorageService);
+        ArgumentCaptor<MailAttachment> attachmentCaptor = ArgumentCaptor.forClass(MailAttachment.class);
+        verify(mailAttachmentMapper).insert(attachmentCaptor.capture());
+        assertEquals("REMOTE_LINK", attachmentCaptor.getValue().getAttachmentKind());
+        assertEquals("https://mail.qq.com/cgi-bin/ftnExs_download?k=abc", attachmentCaptor.getValue().getExternalUrl());
+        verify(processingRecordMapper, never()).insert(any(MailProcessingRecord.class));
     }
 }

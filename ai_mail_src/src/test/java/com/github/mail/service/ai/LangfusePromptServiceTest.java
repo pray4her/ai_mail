@@ -76,4 +76,33 @@ class LangfusePromptServiceTest {
         assertTrue(userMessage.contains("附件提取文本"));
         assertTrue(userMessage.contains("请确认附件报价"));
     }
+
+    @Test
+    void preparePrompt_includesHistoryContextVariableInFallbackPrompt() {
+        AppAiProperties aiProperties = new AppAiProperties();
+        aiProperties.setFallbackSystemPrompt("系统指令");
+        LangfuseProperties langfuseProperties = new LangfuseProperties();
+        langfuseProperties.setEnabled(false);
+
+        LangfusePromptService service = new LangfusePromptService(
+                aiProperties,
+                langfuseProperties,
+                new LangfuseClientFactory(langfuseProperties),
+                new LangfusePromptTemplateValidator()
+        );
+
+        PreparedPrompt preparedPrompt = service.preparePrompt(new AiGenerationRequest(
+                null,
+                "请继续处理本次问题",
+                List.of(),
+                List.of(),
+                "历史邮件: 上次已确认报价",
+                Map.of(),
+                false
+        ));
+
+        String userMessage = preparedPrompt.prompt().getInstructions().get(1).getText();
+        assertTrue(userMessage.contains("## 历史往来上下文"));
+        assertTrue(userMessage.contains("历史邮件: 上次已确认报价"));
+    }
 }

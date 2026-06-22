@@ -2,6 +2,8 @@ package com.github.mail.repo.Mail.dto;
 
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 @Data
 public class MailRawAttachment {
 
@@ -13,4 +15,8 @@ public class MailRawAttachment {
     private String storagePath;
     private String storageType;
     private String fallbackExtractedText;
+    private String attachmentKind;
+    private String externalUrl;
+    private LocalDateTime expiresAt;
+    private String remark;
 }

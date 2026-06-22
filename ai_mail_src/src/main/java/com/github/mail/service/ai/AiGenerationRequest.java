@@ -10,6 +10,7 @@ public record AiGenerationRequest(
         String userQuery,
         List<RagChunk> ragChunks,
         List<AiInputAttachment> attachments,
+        String historyContext,
         Map<String, Object> traceMetadata,
         boolean useNativeAttachments
 ) {
@@ -17,13 +18,23 @@ public record AiGenerationRequest(
     public AiGenerationRequest {
         ragChunks = ragChunks == null ? List.of() : List.copyOf(ragChunks);
         attachments = attachments == null ? List.of() : List.copyOf(attachments);
+        historyContext = historyContext == null ? "" : historyContext;
         traceMetadata = traceMetadata == null ? Map.of() : Map.copyOf(traceMetadata);
     }
 
     public AiGenerationRequest(String providerId,
                                String userQuery,
                                List<RagChunk> ragChunks,
+                               List<AiInputAttachment> attachments,
+                               Map<String, Object> traceMetadata,
+                               boolean useNativeAttachments) {
+        this(providerId, userQuery, ragChunks, attachments, "", traceMetadata, useNativeAttachments);
+    }
+
+    public AiGenerationRequest(String providerId,
+                               String userQuery,
+                               List<RagChunk> ragChunks,
                                Map<String, Object> traceMetadata) {
-        this(providerId, userQuery, ragChunks, List.of(), traceMetadata, false);
+        this(providerId, userQuery, ragChunks, List.of(), "", traceMetadata, false);
     }
 }

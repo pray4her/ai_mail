@@ -114,6 +114,10 @@ CREATE TABLE `mail_account`  (
   `last_sync_uid` bigint NULL DEFAULT 0,
   `uid_validity` bigint NULL DEFAULT NULL,
   `last_sync_at` datetime NULL DEFAULT NULL,
+  `history_synced` tinyint(1) NOT NULL DEFAULT 0,
+  `history_sync_started_at` datetime NULL DEFAULT NULL,
+  `history_sync_completed_at` datetime NULL DEFAULT NULL,
+  `history_sync_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
   `is_deleted` tinyint(1) NULL DEFAULT 0,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -122,6 +126,26 @@ CREATE TABLE `mail_account`  (
   INDEX `idx_last_sync_at`(`last_sync_at` ASC) USING BTREE,
   INDEX `idx_is_deleted`(`is_deleted` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
+
+DROP TABLE IF EXISTS `mail_folder_sync_state`;
+CREATE TABLE `mail_folder_sync_state`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `mail_account_id` bigint NOT NULL,
+  `folder_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sync_scope` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `uid_validity` bigint NULL DEFAULT NULL,
+  `last_synced_uid` bigint NULL DEFAULT 0,
+  `sync_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PENDING',
+  `last_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+  `started_at` datetime NULL DEFAULT NULL,
+  `completed_at` datetime NULL DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_folder_scope`(`mail_account_id` ASC, `folder_name` ASC, `sync_scope` ASC) USING BTREE,
+  INDEX `idx_sync_status`(`sync_status` ASC) USING BTREE,
+  CONSTRAINT `fk_folder_sync_account` FOREIGN KEY (`mail_account_id`) REFERENCES `mail_account` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for mail_attachment
@@ -136,6 +160,10 @@ CREATE TABLE `mail_attachment`  (
   `content_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `storage_path` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `storage_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `attachment_kind` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'MINIO',
+  `external_url` varchar(2048) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `expires_at` datetime NULL DEFAULT NULL,
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `is_scanned` tinyint(1) NULL DEFAULT 0,
   `is_downloaded` tinyint(1) NULL DEFAULT 0,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -154,6 +182,9 @@ CREATE TABLE `mail_message`  (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `mail_account_id` bigint NOT NULL,
   `message_id` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `folder_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
+  `imap_uid` bigint NULL DEFAULT NULL,
+  `folder_uid_validity` bigint NULL DEFAULT NULL,
   `content_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `subject` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `from_email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -166,6 +197,9 @@ CREATE TABLE `mail_message`  (
   `thread_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `body_html` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
   `body_text` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL,
+  `direction` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'INBOUND',
+  `is_history` tinyint(1) NOT NULL DEFAULT 0,
+  `raw_mime_storage_path` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL,
   `has_attachment` tinyint(1) NOT NULL DEFAULT 0,
   `attachment_count` int NOT NULL DEFAULT 0,
   `is_read` tinyint(1) NOT NULL DEFAULT 0,
@@ -178,6 +212,7 @@ CREATE TABLE `mail_message`  (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_message`(`mail_account_id` ASC, `message_id` ASC) USING BTREE,
+  UNIQUE INDEX `uk_folder_uid`(`mail_account_id` ASC, `folder_name` ASC, `folder_uid_validity` ASC, `imap_uid` ASC) USING BTREE,
   UNIQUE INDEX `uk_content_hash`(`mail_account_id` ASC, `content_hash` ASC) USING BTREE,
   INDEX `idx_received_at`(`received_at` ASC) USING BTREE,
   INDEX `idx_from_email`(`from_email` ASC) USING BTREE,

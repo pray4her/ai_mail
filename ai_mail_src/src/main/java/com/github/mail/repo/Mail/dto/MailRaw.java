@@ -18,6 +18,12 @@ public class MailRaw {
     /** 邮件唯一 ID，对应 MailMessage.messageId */
     private String messageId;
 
+    private String folderName;
+
+    private Long imapUid;
+
+    private Long folderUidValidity;
+
     /** 邮件线程 ID，用于关联同一会话的邮件，对应 MailMessage.threadId */
     private String threadId;
 
@@ -29,6 +35,14 @@ public class MailRaw {
 
     /** 收件人列表，对应 MailMessage.toEmails，最终会转成 JSON 字符串 */
     private List<String> to;
+
+    private List<String> cc;
+
+    private List<String> bcc;
+
+    private String inReplyTo;
+
+    private String mailReferences;
 
     /** 邮件发送时间，对应 MailMessage.sentAt */
     private Date sentDate;
@@ -45,5 +59,9 @@ public class MailRaw {
     private int attachmentCount;
 
     private List<MailRawAttachment> attachments;
+
+    private boolean history;
+
+    private byte[] rawMimeBytes;
 }
 

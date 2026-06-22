@@ -145,6 +145,9 @@ public class LangfusePromptService implements AiPromptService {
                 ## 用户邮件内容
                 {{userQuery}}
 
+                ## 历史往来上下文
+                {{historyContext}}
+
                 ## 附件概览
                 {{attachmentSummary}}
 
@@ -155,6 +158,7 @@ public class LangfusePromptService implements AiPromptService {
                 {{fallbackAttachmentText}}
 
                 请结合知识库内容、用户邮件和附件信息，生成一封专业、准确、礼貌的回复邮件。
+                只输出邮件正文，不要输出 Subject、主题、收件人、发件人等邮件头字段。
                 """;
 
         String compiledUserPrompt = compileTemplate(userTemplate, variables);
@@ -176,6 +180,9 @@ public class LangfusePromptService implements AiPromptService {
         Map<String, Object> variables = new HashMap<>();
         variables.put("knowledgeContext", buildKnowledgeContext(request.ragChunks()));
         variables.put("userQuery", request.userQuery());
+        variables.put("historyContext", request.historyContext().isBlank()
+                ? "（无可用历史往来上下文）"
+                : request.historyContext());
         variables.put("ragChunkCount", request.ragChunks().size());
         variables.put("attachmentSummary", buildAttachmentSummary(request.attachments()));
         variables.put("nativeAttachmentHint", request.useNativeAttachments()

@@ -4,6 +4,8 @@ import com.github.mail.model.config.MailConfig;
 import com.github.mail.repo.KnowledgeBase.domain.RagChunk;
 import com.github.mail.repo.Mail.dto.MailRaw;
 import com.github.mail.service.Fetcher.MailFetchService;
+import com.github.mail.service.History.MailHistoryContextService;
+import com.github.mail.service.History.MailHistorySyncService;
 import com.github.mail.service.KnowledgeBase.RagService;
 import com.github.mail.service.MailOperation.MailSendService;
 import com.github.mail.service.Persistence.MailPersistenceService;
@@ -24,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 /**
  * 邮件自动回复定时任务调度器
@@ -42,11 +45,16 @@ import java.util.concurrent.atomic.AtomicLong;
 @ConditionalOnProperty(prefix = "app.mail.auto-reply", name = "enabled", havingValue = "true")
 public class MailAutoReplyScheduler {
 
+    private static final Pattern LEADING_SUBJECT_LINE =
+            Pattern.compile("(?i)^\\s*(subject|主题)\\s*[:：].*(?:\\R+|$)");
+
     private final MailFetchService mailFetchService;
     private final RagService ragService;
     private final AiGenerationService aiGenerationService;
     private final MailSendService mailSendService;
     private final MailPersistenceService mailPersistenceService;
+    private final MailHistorySyncService mailHistorySyncService;
+    private final MailHistoryContextService mailHistoryContextService;
     private final TikaDocumentParser tikaDocumentParser;
     private final MailConfig mailConfig;
 
@@ -225,14 +233,19 @@ public class MailAutoReplyScheduler {
             log.info("发件人: {}, 主题: {}", mail.getFrom(), mail.getSubject());
             log.info("检索到 {} 个相关知识片段", relevantChunks.size());
 
-            Long accountId = mailPersistenceService.findAccountId(imapConfig)
-                    .orElseThrow(() -> new IllegalStateException("未找到邮件账户记录: " + imapConfig.getUsername()));
+            Long accountId = mailHistorySyncService.syncHistoryIfNeeded(imapConfig).getId();
             MailPersistenceService.PersistenceResult persistenceResult =
                     mailPersistenceService.persistEmail(mail, accountId);
             mailMessageId = persistenceResult.getMessageId();
             List<AiInputAttachment> attachments = mailMessageId == null
                     ? List.of()
                     : mailPersistenceService.loadGenerationAttachments(mailMessageId);
+            String historyContext = mailHistoryContextService.buildContext(
+                    accountId,
+                    imapConfig.getUsername(),
+                    mail.getFrom(),
+                    mailMessageId
+            );
 
             Map<String, Object> traceMetadata = new LinkedHashMap<>();
             traceMetadata.put("entrypoint", "scheduler");
@@ -240,16 +253,18 @@ public class MailAutoReplyScheduler {
             traceMetadata.put("mailMessageId", mailMessageId == null ? "" : mailMessageId);
             traceMetadata.put("attachmentCount", attachments.size());
             traceMetadata.put("hasAttachments", !attachments.isEmpty());
+            traceMetadata.put("historyContextChars", historyContext.length());
 
             AiGenerationResult generationResult = aiGenerationService.generate(new AiGenerationRequest(
                     null,
                     userQuery,
                     relevantChunks,
                     attachments,
+                    historyContext,
                     traceMetadata,
                     !attachments.isEmpty()
             ));
-            String aiReplyContent = generationResult.content();
+            String aiReplyContent = sanitizeReplyContent(generationResult.content());
 
             mailSendService.saveDraftToFolder(
                     mail.getFrom(),
@@ -280,6 +295,13 @@ public class MailAutoReplyScheduler {
             return "主题: " + subject;
         }
         return "主题: " + subject + "\n正文: " + effectiveBody;
+    }
+
+    private String sanitizeReplyContent(String content) {
+        if (content == null || content.isBlank()) {
+            return content;
+        }
+        return LEADING_SUBJECT_LINE.matcher(content).replaceFirst("").stripLeading();
     }
 
     /**

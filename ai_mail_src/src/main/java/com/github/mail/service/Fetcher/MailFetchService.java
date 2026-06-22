@@ -2,8 +2,8 @@ package com.github.mail.service.Fetcher;
 
 import com.github.mail.model.config.MailConfig;
 import com.github.mail.repo.Mail.dto.MailRaw;
-import jakarta.mail.Message;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -24,4 +24,13 @@ public interface MailFetchService {
      * @return String 邮件ID
      */
      List<String> fetchInboxIds(MailConfig.Imap imapConfig);
+
+     List<String> listSyncFolders(MailConfig.Imap imapConfig);
+
+     MailHistoryFetchResult fetchHistoryMessages(MailConfig.Imap imapConfig,
+                                                 String folderName,
+                                                 Long expectedUidValidity,
+                                                 Long lastSyncedUid,
+                                                 LocalDateTime cutoff,
+                                                 int limit);
 }

@@ -15,6 +15,10 @@ CREATE TABLE IF NOT EXISTS mail_account
     last_sync_uid BIGINT                DEFAULT 0,
     uid_validity  BIGINT,
     last_sync_at  DATETIME,
+    history_synced TINYINT(1) NOT NULL DEFAULT 0,
+    history_sync_started_at DATETIME,
+    history_sync_completed_at DATETIME,
+    history_sync_error TEXT,
 
     is_deleted    TINYINT(1)            DEFAULT 0,
 
@@ -28,6 +32,28 @@ CREATE TABLE IF NOT EXISTS mail_account
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS mail_folder_sync_state
+(
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    mail_account_id BIGINT       NOT NULL,
+    folder_name     VARCHAR(255) NOT NULL,
+    sync_scope      VARCHAR(50)  NOT NULL,
+    uid_validity    BIGINT,
+    last_synced_uid BIGINT                DEFAULT 0,
+    sync_status     VARCHAR(50)  NOT NULL DEFAULT 'PENDING',
+    last_error      TEXT,
+    started_at      DATETIME,
+    completed_at    DATETIME,
+    created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_folder_sync_account
+        FOREIGN KEY (mail_account_id) REFERENCES mail_account (id) ON DELETE CASCADE,
+    UNIQUE KEY uk_folder_scope (mail_account_id, folder_name, sync_scope),
+    INDEX idx_sync_status (sync_status)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
 -- 邮件消息主表
 CREATE TABLE IF NOT EXISTS mail_message
 (
@@ -35,6 +61,9 @@ CREATE TABLE IF NOT EXISTS mail_message
     mail_account_id  BIGINT       NOT NULL,
 
     message_id       VARCHAR(512) NOT NULL,
+    folder_name      VARCHAR(255),
+    imap_uid         BIGINT,
+    folder_uid_validity BIGINT,
     content_hash     VARCHAR(64),
 
     subject          VARCHAR(500),
@@ -51,6 +80,9 @@ CREATE TABLE IF NOT EXISTS mail_message
 
     body_html        LONGTEXT,
     body_text        LONGTEXT,
+    direction        VARCHAR(20)   NOT NULL DEFAULT 'INBOUND',
+    is_history       TINYINT(1)    NOT NULL DEFAULT 0,
+    raw_mime_storage_path VARCHAR(1024),
 
     has_attachment   TINYINT(1)            DEFAULT 0,
     attachment_count INT                   DEFAULT 0,
@@ -69,6 +101,7 @@ CREATE TABLE IF NOT EXISTS mail_message
         FOREIGN KEY (mail_account_id) REFERENCES mail_account (id) ON DELETE CASCADE,
 
     UNIQUE KEY uk_message (mail_account_id, message_id),
+    UNIQUE KEY uk_folder_uid (mail_account_id, folder_name, folder_uid_validity, imap_uid),
     UNIQUE KEY uk_content_hash (mail_account_id, content_hash),
 
     INDEX idx_received_at (received_at),
@@ -92,6 +125,10 @@ CREATE TABLE IF NOT EXISTS mail_attachment
 
     storage_path    VARCHAR(1024),
     storage_type    VARCHAR(50),
+    attachment_kind VARCHAR(50) NOT NULL DEFAULT 'MINIO',
+    external_url    VARCHAR(2048),
+    expires_at      DATETIME,
+    remark          VARCHAR(500),
 
     is_scanned      TINYINT(1)            DEFAULT 0,
     is_downloaded   TINYINT(1)            DEFAULT 0,

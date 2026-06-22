@@ -33,6 +33,8 @@ public class MailConfig {
      * RAG配置
      */
     private Rag rag = new Rag();
+
+    private HistorySync historySync = new HistorySync();
     
     /**
      * 自动回复配置内部类
@@ -144,5 +146,18 @@ public class MailConfig {
          * 最小分数
          */
         private double minScore = 0.25;
+    }
+
+    @Data
+    public static class HistorySync {
+        private boolean enabled = true;
+
+        private int lookbackDays = 365;
+
+        private int batchSize = 50;
+
+        private int maxContextMessages = 20;
+
+        private int maxContextChars = 12000;
     }
 }

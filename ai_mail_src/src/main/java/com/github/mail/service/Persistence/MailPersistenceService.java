@@ -46,6 +46,8 @@ import java.util.*;
 public class MailPersistenceService {
 
     private static final String STORAGE_TYPE_MINIO = "MINIO";
+    private static final String ATTACHMENT_KIND_MINIO = "MINIO";
+    private static final String ATTACHMENT_KIND_REMOTE_LINK = "REMOTE_LINK";
 
     private final MailMessageMapper mailMessageMapper;
     private final MailAttachmentMapper mailAttachmentMapper;
@@ -69,21 +71,35 @@ public class MailPersistenceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public PersistenceResult persistEmail(MailRaw mailRaw, Long accountId) {
+        return persistEmail(mailRaw, accountId, true);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public PersistenceResult persistHistoryEmail(MailRaw mailRaw, Long accountId) {
+        mailRaw.setHistory(true);
+        return persistEmail(mailRaw, accountId, false);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public PersistenceResult persistEmail(MailRaw mailRaw, Long accountId, boolean createProcessingRecord) {
         try {
-            MailMessage existingMessage = findExistingMessage(accountId, mailRaw.getMessageId());
+            MailMessage existingMessage = findExistingMessage(accountId, mailRaw);
             if (existingMessage != null) {
                 return PersistenceResult.duplicate(existingMessage.getId(), "Message already exists: " + mailRaw.getMessageId());
             }
 
             MailMessage message = convertToMailMessage(mailRaw, accountId);
             mailMessageMapper.insert(message);
+            persistRawMimeIfPresent(mailRaw, message);
             log.info("Persisted mail message: {} from {} with id {}",
                     message.getSubject(), message.getFromEmail(), message.getId());
 
             persistAttachments(mailRaw, message);
 
-            MailProcessingRecord processingRecord = createInitialProcessingRecord(message, accountId);
-            processingRecordMapper.insert(processingRecord);
+            if (createProcessingRecord) {
+                MailProcessingRecord processingRecord = createInitialProcessingRecord(message, accountId);
+                processingRecordMapper.insert(processingRecord);
+            }
 
             return PersistenceResult.success(message.getId());
         } catch (Exception e) {
@@ -131,6 +147,10 @@ public class MailPersistenceService {
      * 检查邮件是否已存在（通过 message_id）
      */
     public Optional<Long> findAccountId(MailConfig.Imap imapConfig) {
+        return findAccount(imapConfig).map(MailAccount::getId);
+    }
+
+    public Optional<MailAccount> findAccount(MailConfig.Imap imapConfig) {
         MailServerProperties.Imap properties = MailServerProperties.fromMailConfig(imapConfig);
         MailAccount account = mailAccountMapper.selectOne(
                 Wrappers.lambdaQuery(MailAccount.class)
@@ -138,7 +158,34 @@ public class MailPersistenceService {
                         .eq(MailAccount::getImapHost, properties.getHost())
                         .eq(MailAccount::getImapPort, properties.getPort())
         );
-        return Optional.ofNullable(account).map(MailAccount::getId);
+        return Optional.ofNullable(account);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public MailAccount ensureAccount(MailConfig.Imap imapConfig) {
+        Optional<MailAccount> existingAccount = findAccount(imapConfig);
+        if (existingAccount.isPresent()) {
+            return existingAccount.get();
+        }
+
+        MailServerProperties.Imap properties = MailServerProperties.fromMailConfig(imapConfig);
+        LocalDateTime now = LocalDateTime.now();
+        MailAccount account = new MailAccount();
+        account.setEmail(properties.getUserName());
+        account.setImapHost(properties.getHost());
+        account.setImapPort(properties.getPort());
+        account.setUsername(properties.getUserName());
+        account.setPassword(imapConfig.getPassword());
+        account.setUseSsl(properties.isSsl() ? 1 : 0);
+        account.setLastSyncAt(now);
+        account.setLastSyncUid(0L);
+        account.setUidValidity(0L);
+        account.setHistorySynced(0);
+        account.setIsDeleted(0);
+        account.setCreatedAt(now);
+        account.setUpdatedAt(now);
+        mailAccountMapper.insert(account);
+        return account;
     }
 
     public List<AiInputAttachment> loadGenerationAttachments(Long mailMessageId) {
@@ -189,11 +236,56 @@ public class MailPersistenceService {
         );
     }
 
-    private MailMessage findExistingMessage(Long accountId, String messageId) {
+    public void markHistorySyncStarted(Long accountId) {
+        LocalDateTime now = LocalDateTime.now();
+        mailAccountMapper.update(null, Wrappers.lambdaUpdate(MailAccount.class)
+                .eq(MailAccount::getId, accountId)
+                .set(MailAccount::getHistorySyncStartedAt, now)
+                .set(MailAccount::getHistorySyncCompletedAt, null)
+                .set(MailAccount::getHistorySyncError, null)
+                .set(MailAccount::getUpdatedAt, now));
+    }
+
+    public void markHistorySyncCompleted(Long accountId) {
+        LocalDateTime now = LocalDateTime.now();
+        mailAccountMapper.update(null, Wrappers.lambdaUpdate(MailAccount.class)
+                .eq(MailAccount::getId, accountId)
+                .set(MailAccount::getHistorySynced, 1)
+                .set(MailAccount::getHistorySyncCompletedAt, now)
+                .set(MailAccount::getHistorySyncError, null)
+                .set(MailAccount::getUpdatedAt, now));
+    }
+
+    public void markHistorySyncFailed(Long accountId, String errorMessage) {
+        LocalDateTime now = LocalDateTime.now();
+        mailAccountMapper.update(null, Wrappers.lambdaUpdate(MailAccount.class)
+                .eq(MailAccount::getId, accountId)
+                .set(MailAccount::getHistorySynced, 0)
+                .set(MailAccount::getHistorySyncError, errorMessage)
+                .set(MailAccount::getUpdatedAt, now));
+    }
+
+    private MailMessage findExistingMessage(Long accountId, MailRaw mailRaw) {
+        if (mailRaw.getMessageId() != null && !mailRaw.getMessageId().isBlank()) {
+            MailMessage byMessageId = mailMessageMapper.selectOne(
+                    Wrappers.lambdaQuery(MailMessage.class)
+                            .eq(MailMessage::getMailAccountId, accountId)
+                            .eq(MailMessage::getMessageId, mailRaw.getMessageId())
+                            .last("limit 1")
+            );
+            if (byMessageId != null) {
+                return byMessageId;
+            }
+        }
+        if (mailRaw.getFolderName() == null || mailRaw.getImapUid() == null || mailRaw.getFolderUidValidity() == null) {
+            return null;
+        }
         return mailMessageMapper.selectOne(
                 Wrappers.lambdaQuery(MailMessage.class)
                         .eq(MailMessage::getMailAccountId, accountId)
-                        .eq(MailMessage::getMessageId, messageId)
+                        .eq(MailMessage::getFolderName, mailRaw.getFolderName())
+                        .eq(MailMessage::getImapUid, mailRaw.getImapUid())
+                        .eq(MailMessage::getFolderUidValidity, mailRaw.getFolderUidValidity())
                         .last("limit 1")
         );
     }
@@ -206,6 +298,9 @@ public class MailPersistenceService {
         MailMessage message = new MailMessage();
         message.setMailAccountId(accountId);
         message.setMessageId(mailRaw.getMessageId());
+        message.setFolderName(mailRaw.getFolderName());
+        message.setImapUid(mailRaw.getImapUid());
+        message.setFolderUidValidity(mailRaw.getFolderUidValidity());
         message.setSubject(mailRaw.getSubject());
         message.setFromEmail(mailRaw.getFrom());
 
@@ -213,6 +308,10 @@ public class MailPersistenceService {
         if (mailRaw.getTo() != null && !mailRaw.getTo().isEmpty()) {
             message.setToEmails(mailRaw.getTo());
         }
+        message.setCcEmails(mailRaw.getCc());
+        message.setBccEmails(mailRaw.getBcc());
+        message.setInReplyTo(mailRaw.getInReplyTo());
+        message.setMailReferences(mailRaw.getMailReferences());
 
         String text = mailRaw.getTextBody();
         if ((text == null || text.isBlank()) && mailRaw.getHtmlBody() != null) {
@@ -228,10 +327,33 @@ public class MailPersistenceService {
         message.setHasAttachment(mailRaw.isHasAttachment() ? 1 : 0);
         message.setAttachmentCount(mailRaw.getAttachmentCount());
         message.setThreadId(mailRaw.getThreadId());
+        message.setDirection(resolveDirection(mailRaw, accountId));
+        message.setIsHistory(mailRaw.isHistory() ? 1 : 0);
         message.setIsRead(0);
         message.setIsDeleted(0);
 
         return message;
+    }
+
+    private String resolveDirection(MailRaw mailRaw, Long accountId) {
+        MailAccount account = mailAccountMapper.selectById(accountId);
+        String accountEmail = account == null ? null : account.getEmail();
+        if (accountEmail != null && mailRaw.getFrom() != null && accountEmail.equalsIgnoreCase(mailRaw.getFrom())) {
+            return "OUTBOUND";
+        }
+        return "INBOUND";
+    }
+
+    private void persistRawMimeIfPresent(MailRaw mailRaw, MailMessage message) {
+        byte[] rawMimeBytes = mailRaw.getRawMimeBytes();
+        if (rawMimeBytes == null || rawMimeBytes.length == 0) {
+            return;
+        }
+        String storagePath = "mail-raw/" + message.getId() + ".eml";
+        minioStorageService.uploadFile(storagePath, rawMimeBytes, "message/rfc822");
+        message.setRawMimeStoragePath(storagePath);
+        message.setUpdatedAt(LocalDateTime.now());
+        mailMessageMapper.updateById(message);
     }
 
     private void persistAttachments(MailRaw mailRaw, MailMessage message) {
@@ -241,10 +363,15 @@ public class MailPersistenceService {
         }
 
         for (MailRawAttachment attachment : attachments) {
+            if (ATTACHMENT_KIND_REMOTE_LINK.equalsIgnoreCase(attachment.getAttachmentKind())) {
+                persistRemoteAttachment(message, attachment);
+                continue;
+            }
             String storagePath = buildAttachmentStoragePath(message.getId(), attachment);
             minioStorageService.uploadFile(storagePath, attachment.getBytes(), attachment.getContentType());
             attachment.setStoragePath(storagePath);
             attachment.setStorageType(STORAGE_TYPE_MINIO);
+            attachment.setAttachmentKind(ATTACHMENT_KIND_MINIO);
             attachment.setFallbackExtractedText(extractFallbackText(attachment));
 
             MailAttachment entity = new MailAttachment();
@@ -255,11 +382,31 @@ public class MailPersistenceService {
             entity.setContentHash(attachment.getContentHash());
             entity.setStoragePath(storagePath);
             entity.setStorageType(STORAGE_TYPE_MINIO);
+            entity.setAttachmentKind(ATTACHMENT_KIND_MINIO);
             entity.setIsDownloaded(1);
             entity.setIsScanned(0);
             entity.setCreatedAt(LocalDateTime.now());
             mailAttachmentMapper.insert(entity);
         }
+    }
+
+    private void persistRemoteAttachment(MailMessage message, MailRawAttachment attachment) {
+        MailAttachment entity = new MailAttachment();
+        entity.setMailMessageId(message.getId());
+        entity.setFilename(attachment.getFilename());
+        entity.setContentType(attachment.getContentType());
+        entity.setContentLength(attachment.getSize());
+        entity.setContentHash(attachment.getContentHash());
+        entity.setStoragePath(attachment.getExternalUrl());
+        entity.setStorageType(ATTACHMENT_KIND_REMOTE_LINK);
+        entity.setAttachmentKind(ATTACHMENT_KIND_REMOTE_LINK);
+        entity.setExternalUrl(attachment.getExternalUrl());
+        entity.setExpiresAt(attachment.getExpiresAt());
+        entity.setRemark(attachment.getRemark());
+        entity.setIsDownloaded(0);
+        entity.setIsScanned(0);
+        entity.setCreatedAt(LocalDateTime.now());
+        mailAttachmentMapper.insert(entity);
     }
 
     private String buildAttachmentStoragePath(Long mailMessageId, MailRawAttachment attachment) {
@@ -301,6 +448,20 @@ public class MailPersistenceService {
     }
 
     private AiInputAttachment toAiInputAttachment(MailAttachment attachment) {
+        if (ATTACHMENT_KIND_REMOTE_LINK.equalsIgnoreCase(attachment.getAttachmentKind())) {
+            String fallbackText = String.join("\n",
+                    "远程附件链接: " + Objects.toString(attachment.getExternalUrl(), ""),
+                    "备注: " + Objects.toString(attachment.getRemark(), "")
+            ).trim();
+            return new AiInputAttachment(
+                    attachment.getId(),
+                    attachment.getFilename(),
+                    attachment.getContentType(),
+                    attachment.getExternalUrl(),
+                    attachment.getContentHash(),
+                    fallbackText
+            );
+        }
         String fallbackExtractedText = null;
         if (supportsTextFallback(attachment.getContentType(), attachment.getFilename())) {
             byte[] bytes = minioStorageService.readBytes(attachment.getStoragePath());

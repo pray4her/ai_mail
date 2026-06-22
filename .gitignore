@@ -57,8 +57,5 @@ Thumbs.db
 # Maven wrapper binary cache, if generated locally
 .mvn/wrapper/maven-wrapper.jar
 
-# front source code
-ai_mail_front_src/node_modules/
-ai_mail_front_src/.next/
-ai_mail_front_src/.vercel/
-ai_mail_front_src/.turbo/
+# 前端项目
+ai_mail_front_src

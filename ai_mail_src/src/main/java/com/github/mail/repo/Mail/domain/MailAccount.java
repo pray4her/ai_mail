@@ -75,6 +75,18 @@ public class MailAccount {
     @TableField(value = "uid_validity")
     private Long uidValidity;
 
+    @TableField(value = "history_synced")
+    private Integer historySynced;
+
+    @TableField(value = "history_sync_started_at")
+    private LocalDateTime historySyncStartedAt;
+
+    @TableField(value = "history_sync_completed_at")
+    private LocalDateTime historySyncCompletedAt;
+
+    @TableField(value = "history_sync_error")
+    private String historySyncError;
+
     /**
      * 软删除标记
      */

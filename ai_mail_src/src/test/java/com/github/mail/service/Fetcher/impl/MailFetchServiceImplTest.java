@@ -2,7 +2,8 @@ package com.github.mail.service.Fetcher.impl;
 
 import com.github.mail.repo.Mail.dto.MailRaw;
 import com.github.mail.repo.Mail.dto.MailRawAttachment;
-import com.github.mail.repo.Mail.mapper.MailAccountMapper;
+import com.github.mail.service.Fetcher.MailMessageParser;
+import com.github.mail.service.Fetcher.QqLargeAttachmentDetector;
 import jakarta.activation.DataHandler;
 import jakarta.mail.Session;
 import jakarta.mail.internet.InternetAddress;
@@ -13,20 +14,17 @@ import jakarta.mail.internet.MimeUtility;
 import jakarta.mail.util.ByteArrayDataSource;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-
 class MailFetchServiceImplTest {
 
     @Test
     void parseMessage_extractsBodyAndAttachmentMetadata() throws Exception {
-        MailFetchServiceImpl service = new MailFetchServiceImpl(mock(MailAccountMapper.class));
+        MailMessageParser parser = new MailMessageParser(new QqLargeAttachmentDetector());
         MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
         message.setHeader("Message-ID", "<mid-1>");
         message.setSubject("附件测试", "UTF-8");
@@ -56,9 +54,7 @@ class MailFetchServiceImplTest {
         message.setContent(mixed);
         message.saveChanges();
 
-        Method parseMethod = MailFetchServiceImpl.class.getDeclaredMethod("parseMessage", jakarta.mail.Message.class);
-        parseMethod.setAccessible(true);
-        MailRaw mailRaw = (MailRaw) parseMethod.invoke(service, message);
+        MailRaw mailRaw = parser.parse(message, "INBOX", null, null, false);
 
         assertNotNull(mailRaw.getMessageId());
         assertTrue(mailRaw.getMessageId().startsWith("<"));
@@ -77,7 +73,7 @@ class MailFetchServiceImplTest {
 
     @Test
     void parseMessage_infersSpecificMimeTypeWhenAttachmentIsGenericOctetStream() throws Exception {
-        MailFetchServiceImpl service = new MailFetchServiceImpl(mock(MailAccountMapper.class));
+        MailMessageParser parser = new MailMessageParser(new QqLargeAttachmentDetector());
         MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
         message.setHeader("Message-ID", "<mid-2>");
         message.setSubject("附件测试2", "UTF-8");
@@ -98,9 +94,7 @@ class MailFetchServiceImplTest {
         message.setContent(mixed);
         message.saveChanges();
 
-        Method parseMethod = MailFetchServiceImpl.class.getDeclaredMethod("parseMessage", jakarta.mail.Message.class);
-        parseMethod.setAccessible(true);
-        MailRaw mailRaw = (MailRaw) parseMethod.invoke(service, message);
+        MailRaw mailRaw = parser.parse(message, "INBOX", null, null, false);
 
         assertEquals(1, mailRaw.getAttachmentCount());
         assertEquals(
@@ -111,7 +105,7 @@ class MailFetchServiceImplTest {
 
     @Test
     void parseMessage_decodesMimeEncodedFilenameBeforeInferringMimeType() throws Exception {
-        MailFetchServiceImpl service = new MailFetchServiceImpl(mock(MailAccountMapper.class));
+        MailMessageParser parser = new MailMessageParser(new QqLargeAttachmentDetector());
         MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
         message.setHeader("Message-ID", "<mid-3>");
         message.setSubject("附件测试3", "UTF-8");
@@ -129,12 +123,33 @@ class MailFetchServiceImplTest {
         message.setContent(mixed);
         message.saveChanges();
 
-        Method parseMethod = MailFetchServiceImpl.class.getDeclaredMethod("parseMessage", jakarta.mail.Message.class);
-        parseMethod.setAccessible(true);
-        MailRaw mailRaw = (MailRaw) parseMethod.invoke(service, message);
+        MailRaw mailRaw = parser.parse(message, "INBOX", null, null, false);
 
         assertEquals(1, mailRaw.getAttachmentCount());
         assertEquals("resume.pdf", mailRaw.getAttachments().get(0).getFilename());
         assertEquals("application/pdf", mailRaw.getAttachments().get(0).getContentType());
+    }
+
+    @Test
+    void parseMessage_detectsQqLargeAttachmentLinksAndKeepsRawMime() throws Exception {
+        MailMessageParser parser = new MailMessageParser(new QqLargeAttachmentDetector());
+        MimeMessage message = new MimeMessage(Session.getInstance(new Properties()));
+        message.setHeader("Message-ID", "<mid-4>");
+        message.setSubject("超大附件", "UTF-8");
+        message.setFrom(new InternetAddress("sender@qq.com"));
+        message.setRecipient(jakarta.mail.Message.RecipientType.TO, new InternetAddress("receiver@qq.com"));
+        message.setText("请下载 https://mail.qq.com/cgi-bin/ftnExs_download?file=large.zip&k=abc", "UTF-8");
+        message.saveChanges();
+
+        MailRaw mailRaw = parser.parse(message, "INBOX", 15L, 99L, true);
+
+        assertTrue(mailRaw.isHistory());
+        assertEquals(15L, mailRaw.getImapUid());
+        assertEquals(99L, mailRaw.getFolderUidValidity());
+        assertEquals(1, mailRaw.getAttachmentCount());
+        assertEquals("REMOTE_LINK", mailRaw.getAttachments().get(0).getAttachmentKind());
+        assertEquals("large.zip", mailRaw.getAttachments().get(0).getFilename());
+        assertNotNull(mailRaw.getRawMimeBytes());
+        assertTrue(mailRaw.getRawMimeBytes().length > 0);
     }
 }

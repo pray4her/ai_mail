@@ -43,6 +43,15 @@ public class MailMessage {
     @TableField(value = "message_id")
     private String messageId;
 
+    @TableField(value = "folder_name")
+    private String folderName;
+
+    @TableField(value = "imap_uid")
+    private Long imapUid;
+
+    @TableField(value = "folder_uid_validity")
+    private Long folderUidValidity;
+
     /**
      * 内容哈希值（SHA-256）
      * 用于快速去重检查：检测内容相同但 message_id 不同的邮件
@@ -113,6 +122,15 @@ public class MailMessage {
      */
     @TableField(value = "body_text")
     private String bodyText;
+
+    @TableField(value = "direction")
+    private String direction;
+
+    @TableField(value = "is_history")
+    private Integer isHistory;
+
+    @TableField(value = "raw_mime_storage_path")
+    private String rawMimeStoragePath;
 
     /**
      * 是否有附件

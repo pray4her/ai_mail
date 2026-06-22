@@ -80,6 +80,18 @@ public class MailAttachment {
     @TableField(value = "storage_type")
     private String storageType;
 
+    @TableField(value = "attachment_kind")
+    private String attachmentKind;
+
+    @TableField(value = "external_url")
+    private String externalUrl;
+
+    @TableField(value = "expires_at")
+    private LocalDateTime expiresAt;
+
+    @TableField(value = "remark")
+    private String remark;
+
     /**
      * 是否已扫描
      * 用于追踪附件是否已进行病毒扫描或安全检查

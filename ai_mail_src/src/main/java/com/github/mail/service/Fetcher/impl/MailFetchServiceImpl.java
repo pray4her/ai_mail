@@ -3,484 +3,269 @@ package com.github.mail.service.Fetcher.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.github.mail.model.config.MailConfig;
-import com.github.mail.utils.MailConnectUtil;
-import com.github.mail.utils.MailIdUtil;
 import com.github.mail.model.config.Properties.MailServerProperties;
-import com.github.mail.repo.Mail.dto.MailRaw;
-import com.github.mail.repo.Mail.dto.MailRawAttachment;
 import com.github.mail.repo.Mail.domain.MailAccount;
+import com.github.mail.repo.Mail.dto.MailRaw;
 import com.github.mail.repo.Mail.mapper.MailAccountMapper;
 import com.github.mail.service.Fetcher.MailFetchService;
-import jakarta.mail.*;
-import jakarta.mail.internet.InternetAddress;
-import jakarta.mail.internet.MimeUtility;
+import com.github.mail.service.Fetcher.MailHistoryFetchResult;
+import com.github.mail.service.Fetcher.MailMessageParser;
+import com.github.mail.utils.MailConnectUtil;
+import com.github.mail.utils.MailIdUtil;
+import jakarta.mail.FetchProfile;
+import jakarta.mail.Folder;
+import jakarta.mail.Message;
+import jakarta.mail.MessagingException;
+import jakarta.mail.Store;
+import jakarta.mail.UIDFolder;
+import jakarta.mail.search.ComparisonTerm;
+import jakarta.mail.search.OrTerm;
+import jakarta.mail.search.ReceivedDateTerm;
+import jakarta.mail.search.SearchTerm;
+import jakarta.mail.search.SentDateTerm;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.net.URLConnection;
-import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
-/**
- * 用户邮件拉取服务实现
- * @author Aster
- * @date 2025/12/24
- */
-
-//TODO：实现ThreadID保存会话(上下文)
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class MailFetchServiceImpl implements MailFetchService {
 
-    private static final Map<String, String> MIME_TYPES_BY_EXTENSION = Map.ofEntries(
-            Map.entry("pdf", "application/pdf"),
-            Map.entry("doc", "application/msword"),
-            Map.entry("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-            Map.entry("xls", "application/vnd.ms-excel"),
-            Map.entry("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-            Map.entry("ppt", "application/vnd.ms-powerpoint"),
-            Map.entry("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
-            Map.entry("rtf", "application/rtf"),
-            Map.entry("txt", "text/plain"),
-            Map.entry("csv", "text/csv"),
-            Map.entry("png", "image/png"),
-            Map.entry("jpg", "image/jpeg"),
-            Map.entry("jpeg", "image/jpeg"),
-            Map.entry("gif", "image/gif"),
-            Map.entry("bmp", "image/bmp"),
-            Map.entry("webp", "image/webp")
+    private static final int LIVE_FETCH_LIMIT = 50;
+    private static final Set<String> SKIPPED_HISTORY_FOLDERS = Set.of(
+            "draft", "drafts", "trash", "deleted", "deleted messages", "spam", "junk"
     );
 
-
     private final MailAccountMapper mailAccountMapper;
-
+    private final MailMessageParser mailMessageParser;
 
     @Override
     public List<MailRaw> fetchToAiReply(MailConfig.Imap imapConfig) {
-
-        MailServerProperties.Imap config =
-                MailServerProperties.fromMailConfig(imapConfig);
-
+        MailServerProperties.Imap config = MailServerProperties.fromMailConfig(imapConfig);
         List<MailRaw> result = new ArrayList<>();
-
         try (Store store = MailConnectUtil.connect(config)) {
-
             Folder inbox = store.getFolder("INBOX");
             inbox.open(Folder.READ_ONLY);
-
             Long lastSyncUid = getLastSyncUid(config);
-
             if (inbox instanceof UIDFolder uidFolder) {
-
-                long uidValidity = uidFolder.getUIDValidity();
-                log.info("UIDValidity: {}", uidValidity);
-
-                // ========= 第一次同步（没有 lastSyncUid） =========
-                // TODO：第一次同步不回复邮件 直接保存账户信息
-                if (lastSyncUid == null || lastSyncUid <= 0) {
-
-                    int total = inbox.getMessageCount();
-                    if (total == 0) {
-                        inbox.close(false);
-                        return result;
-                    }
-
-                    int FETCH_SIZE = 10;
-                    int start = Math.max(1, total - FETCH_SIZE + 1);
-
-                    Message[] recentMessages = inbox.getMessages(start, total);
-
-                    long maxUid = 0;
-                    for (Message message : recentMessages) {
-                        long uid = uidFolder.getUID(message);
-                        maxUid = Math.max(maxUid, uid);
-                        result.add(parseMessage(message));
-                    }
-
-                    if (maxUid > 0) {
-                        updateUidConfig(config, maxUid, uidValidity);
-                    }
-
-                    inbox.close(false);
-                    //对于新用户返回空列表则表示不生成回复邮件（简单实现）(未测试)
-                    return Collections.emptyList();
-                    //return result;
-                }
-
-                // ========= 正常增量同步 =========
-                log.info("LastSyncUid: {}", lastSyncUid);
-                log.info("FolderLastUID: {}",UIDFolder.LASTUID);
-
-                Message[] newMessages =
-                        uidFolder.getMessagesByUID(lastSyncUid + 1, UIDFolder.LASTUID);
-
-                if (newMessages == null || newMessages.length == 0) {
-                    inbox.close(false);
-                    return result;
-                }
-
-                long maxUid = lastSyncUid;
-
-                //  防止一次拉太多
-                int LIMIT = 50;
-                int count = Math.min(newMessages.length, LIMIT);
-
-                for (int i = 0; i < count; i++) {
-                    Message message = newMessages[i];
-                    long uid = uidFolder.getUID(message);
-
-                    if (uid <= lastSyncUid) {
-                        continue;
-                    }
-
-                    maxUid = Math.max(maxUid, uid);
-                    result.add(parseMessage(message));
-                }
-
-                if (maxUid > lastSyncUid) {
-                    updateUidConfig(config, maxUid, uidValidity);
-                }
-
+                fetchLiveByUid(config, result, inbox, uidFolder, lastSyncUid);
             } else {
-                log.warn("Folder is not UIDFolder, fallback to recent messages");
-
-                int total = inbox.getMessageCount();
-                int start = Math.max(1, total - 4);
-                Message[] messages = inbox.getMessages(start, total);
-
-                for (Message message : messages) {
-                    result.add(parseMessage(message));
-                }
+                fetchRecentWithoutUid(result, inbox);
             }
-
             inbox.close(false);
-
         } catch (Exception e) {
             log.error("拉取邮件失败", e);
         }
-
         return result;
     }
 
-
-
-    //TODO：用于测试邮箱移动功能，未启用
     @Override
     public List<String> fetchInboxIds(MailConfig.Imap imapConfig) {
+        return fetchToAiReply(imapConfig).stream()
+                .map(MailRaw::getMessageId)
+                .filter(messageId -> messageId != null && !messageId.isBlank())
+                .toList();
+    }
 
-
-        MailServerProperties.Imap config =
-                MailServerProperties.fromMailConfig(imapConfig);
-
+    @Override
+    public List<String> listSyncFolders(MailConfig.Imap imapConfig) {
+        MailServerProperties.Imap config = MailServerProperties.fromMailConfig(imapConfig);
         try (Store store = MailConnectUtil.connect(config)) {
-            Folder inbox = store.getFolder("INBOX");
-            inbox.open(Folder.READ_ONLY);
-
-            // 获取当前邮箱账户的最后同步UID
-            Long lastSyncUid = getLastSyncUid(config);
-
-            List<String> result = new ArrayList<>();
-
-            // 将Folder转换为UIDFolder以使用UID功能
-            if (inbox instanceof UIDFolder uidFolder) {
-                // 获取最新的邮件UID
-                Message[] allMessages = inbox.getMessages();
-                long uidValidity = uidFolder.getUIDValidity();
-                if (allMessages.length > 0) {
-                    // 获取最大UID
-                    long maxUid = 0;
-                    for (Message msg : allMessages) {
-                        long uid = uidFolder.getUID(msg);
-                        if (uid > maxUid) {
-                            maxUid = uid;
-                        }
-                    }
-
-                    // 如果有最后同步的UID，则只拉取新的邮件
-                    if (lastSyncUid != null && lastSyncUid > 0) {
-                        // 拉取大于lastSyncUid的邮件
-                        if (maxUid > lastSyncUid) {
-                            Message[] newMessages = uidFolder.getMessagesByUID(lastSyncUid + 1, maxUid);
-                            for (Message message : newMessages) {
-                                try {
-                                    String uniqueId = MailIdUtil.getUniqueEmailId(message);
-                                    if (uniqueId != null) {
-                                        result.add(uniqueId);
-                                    }
-                                } catch (Exception e) {
-                                    log.error("获取邮件Id失败", e);
-                                }
-                            }
-                        }
-                    } else {
-                        // 如果没有最后同步的UID，拉取最近的5封邮件
-                        int total = inbox.getMessageCount();
-                        int start = Math.max(1, total - 4);
-                        Message[] recentMessages = inbox.getMessages(start, total);
-                        for (Message message : recentMessages) {
-                            long uid = uidFolder.getUID(message);
-                            if (uid > lastSyncUid) {
-                                try {
-                                    String uniqueId = MailIdUtil.getUniqueEmailId(message);
-                                    if (uniqueId != null) {
-                                        result.add(uniqueId);
-                                    }
-                                } catch (Exception e) {
-                                    log.error("获取邮件Id失败", e);
-                                }
-                            }
-                        }
-                    }
-
-                    // 更新最后同步的UID
-                    if (maxUid > 0) {
-                        updateUidConfig(config, maxUid, uidValidity);
-                    }
-                }
-            } else {
-                log.warn("Folder is not a UIDFolder, falling back to original method");
-                // 降级到原来的实现方式
-                Message[] messages = inbox.getMessages();
-                for (Message message : messages) {
-                    try {
-                        String uniqueId = MailIdUtil.getUniqueEmailId(message);
-                        if (uniqueId != null) {
-                            result.add(uniqueId);
-                        }
-                    } catch (Exception e) {
-                        log.error("获取邮件Id失败", e);
-                    }
+            Folder[] folders = store.getDefaultFolder().list("*");
+            List<String> names = new ArrayList<>();
+            for (Folder folder : folders) {
+                if (holdsMessages(folder) && !isSkippedHistoryFolder(folder.getFullName())) {
+                    names.add(folder.getFullName());
                 }
             }
-
-            inbox.close(false);
-            return result;
+            return names.stream().distinct().toList();
         } catch (Exception e) {
-            log.error("拉取邮件Id列表失败", e);
-            return new ArrayList<>();
+            throw new IllegalStateException("列出 IMAP 文件夹失败: " + config.getUserName(), e);
         }
     }
 
-
-    private MailRaw parseMessage(Message message) throws Exception {
-
-        MailRaw mail = new MailRaw();
-        mail.setAttachments(new ArrayList<>());
-
-        mail.setMessageId(getHeader(message, "Message-ID"));
-        mail.setSubject(message.getSubject());
-        mail.setSentDate(message.getSentDate());
-
-        mail.setFrom(((InternetAddress) message.getFrom()[0]).getAddress());
-
-        Address[] recipients = message.getRecipients(Message.RecipientType.TO);
-        if (recipients != null) {
-            mail.setTo(Arrays.stream(recipients)
-                    .map(addr -> ((InternetAddress) addr).getAddress())
-                    .toList()
-            );
-        } else {
-            mail.setTo(List.of());
-        }
-
-        extractContent(message, mail);
-        mail.setAttachmentCount(mail.getAttachments().size());
-        mail.setHasAttachment(!mail.getAttachments().isEmpty());
-
-        return mail;
-    }
-
-
-    private String getHeader(Message message, String name) throws MessagingException {
-        String[] values = message.getHeader(name);
-        if (values == null || values.length == 0) {
-            return null;
-        }
-        return values[0];
-    }
-
-
-    private void extractContent(Part part, MailRaw mail) throws Exception {
-        if (isAttachmentPart(part)) {
-            mail.getAttachments().add(extractAttachment(part));
-            return;
-        }
-
-        if (part.isMimeType("text/plain") && mail.getTextBody() == null) {
-            mail.setTextBody(part.getContent().toString());
-            return;
-        }
-
-        if (part.isMimeType("text/html") && mail.getHtmlBody() == null) {
-            mail.setHtmlBody(part.getContent().toString());
-            return;
-        }
-
-        if (part.isMimeType("multipart/*")) {
-            Multipart multipart = (Multipart) part.getContent();
-            for (int i = 0; i < multipart.getCount(); i++) {
-                extractContent(multipart.getBodyPart(i), mail);
+    @Override
+    public MailHistoryFetchResult fetchHistoryMessages(MailConfig.Imap imapConfig,
+                                                       String folderName,
+                                                       Long expectedUidValidity,
+                                                       Long lastSyncedUid,
+                                                       LocalDateTime cutoff,
+                                                       int limit) {
+        MailServerProperties.Imap config = MailServerProperties.fromMailConfig(imapConfig);
+        try (Store store = MailConnectUtil.connect(config)) {
+            Folder folder = store.getFolder(folderName);
+            folder.open(Folder.READ_ONLY);
+            if (!(folder instanceof UIDFolder uidFolder)) {
+                folder.close(false);
+                return new MailHistoryFetchResult(folderName, -1, lastSyncedUid == null ? 0 : lastSyncedUid, List.of());
             }
+            long uidValidity = uidFolder.getUIDValidity();
+            long effectiveLastUid = expectedUidValidity != null && expectedUidValidity == uidValidity
+                    ? nullToZero(lastSyncedUid)
+                    : 0L;
+            Message[] candidates = folder.search(recentMessages(cutoff));
+            prefetch(folder, candidates);
+            List<MessageWithUid> ordered = messagesAfterUid(uidFolder, candidates, effectiveLastUid);
+            List<MailRaw> messages = new ArrayList<>();
+            long highestUid = effectiveLastUid;
+            for (MessageWithUid item : ordered) {
+                if (messages.size() >= limit) {
+                    break;
+                }
+                highestUid = Math.max(highestUid, item.uid());
+                messages.add(mailMessageParser.parse(item.message(), folderName, item.uid(), uidValidity, true));
+            }
+            folder.close(false);
+            return new MailHistoryFetchResult(folderName, uidValidity, highestUid, messages);
+        } catch (Exception e) {
+            throw new IllegalStateException("同步历史邮件失败: " + folderName, e);
+        }
+    }
+
+    private void fetchLiveByUid(MailServerProperties.Imap config,
+                                List<MailRaw> result,
+                                Folder inbox,
+                                UIDFolder uidFolder,
+                                Long lastSyncUid) throws Exception {
+        long uidValidity = uidFolder.getUIDValidity();
+        if (lastSyncUid == null || lastSyncUid <= 0) {
+            updateInitialUid(config, inbox, uidFolder, uidValidity);
             return;
         }
-
-        if (part.isMimeType("message/rfc822") && part.getContent() instanceof Part nestedPart) {
-            extractContent(nestedPart, mail);
+        Message[] newMessages = uidFolder.getMessagesByUID(lastSyncUid + 1, UIDFolder.LASTUID);
+        long maxUid = lastSyncUid;
+        for (int i = 0; i < Math.min(newMessages.length, LIVE_FETCH_LIMIT); i++) {
+            long uid = uidFolder.getUID(newMessages[i]);
+            if (uid <= lastSyncUid) {
+                continue;
+            }
+            maxUid = Math.max(maxUid, uid);
+            result.add(mailMessageParser.parse(newMessages[i], "INBOX", uid, uidValidity, false));
+        }
+        if (maxUid > lastSyncUid) {
+            updateUidConfig(config, maxUid, uidValidity);
         }
     }
 
-    private boolean isAttachmentPart(Part part) throws MessagingException {
-        String disposition = part.getDisposition();
-        if (Part.ATTACHMENT.equalsIgnoreCase(disposition) || Part.INLINE.equalsIgnoreCase(disposition)) {
-            return part.getFileName() != null;
+    private void updateInitialUid(MailServerProperties.Imap config,
+                                  Folder inbox,
+                                  UIDFolder uidFolder,
+                                  long uidValidity) throws MessagingException {
+        int total = inbox.getMessageCount();
+        if (total == 0) {
+            return;
         }
-        return part.getFileName() != null && !part.isMimeType("text/plain") && !part.isMimeType("text/html");
-    }
-
-    private MailRawAttachment extractAttachment(Part part) throws Exception {
-        MailRawAttachment attachment = new MailRawAttachment();
-        byte[] bytes;
-        try (var inputStream = part.getInputStream()) {
-            bytes = inputStream.readAllBytes();
+        int start = Math.max(1, total - 9);
+        Message[] recentMessages = inbox.getMessages(start, total);
+        long maxUid = 0;
+        for (Message message : recentMessages) {
+            maxUid = Math.max(maxUid, uidFolder.getUID(message));
         }
-
-        String filename = decodeMimeText(part.getFileName());
-        String contentType = resolveContentType(part, filename);
-        attachment.setFilename(filename == null || filename.isBlank() ? UUID.randomUUID() + ".bin" : filename);
-        attachment.setContentType(contentType);
-        attachment.setSize(bytes.length);
-        attachment.setBytes(bytes);
-        attachment.setContentHash(sha256Hex(bytes));
-        return attachment;
-    }
-
-    private String resolveContentType(Part part, String filename) throws MessagingException {
-        String normalizedRawType = normalizeMimeType(part.getContentType());
-        if (normalizedRawType != null && !normalizedRawType.isBlank() && !isGenericBinaryMimeType(normalizedRawType)) {
-            return normalizedRawType;
-        }
-        String inferred = inferContentTypeFromFilename(filename);
-        if (inferred != null && !inferred.isBlank()) {
-            return inferred;
-        }
-        return normalizedRawType == null || normalizedRawType.isBlank()
-                ? "application/octet-stream"
-                : normalizedRawType;
-    }
-
-    private String normalizeMimeType(String rawContentType) {
-        if (rawContentType == null || rawContentType.isBlank()) {
-            return null;
-        }
-        int separatorIndex = rawContentType.indexOf(';');
-        String mimeType = separatorIndex > 0 ? rawContentType.substring(0, separatorIndex) : rawContentType;
-        String normalized = mimeType.trim().toLowerCase(Locale.ROOT);
-        return normalized.isBlank() ? null : normalized;
-    }
-
-    private boolean isGenericBinaryMimeType(String mimeType) {
-        return "application/octet-stream".equalsIgnoreCase(mimeType);
-    }
-
-    private String decodeMimeText(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
-        }
-        try {
-            return MimeUtility.decodeText(value);
-        } catch (Exception e) {
-            log.debug("Failed to decode MIME text, using raw value: {}", value, e);
-            return value;
+        if (maxUid > 0) {
+            updateUidConfig(config, maxUid, uidValidity);
         }
     }
 
-    private String inferContentTypeFromFilename(String filename) {
-        if (filename == null || filename.isBlank()) {
-            return null;
+    private void fetchRecentWithoutUid(List<MailRaw> result, Folder inbox) throws Exception {
+        int total = inbox.getMessageCount();
+        int start = Math.max(1, total - 4);
+        for (Message message : inbox.getMessages(start, total)) {
+            result.add(mailMessageParser.parse(message, "INBOX", null, null, false));
         }
-        String inferred = URLConnection.guessContentTypeFromName(filename);
-        if (inferred != null && !inferred.isBlank()) {
-            return normalizeMimeType(inferred);
-        }
-        int extensionSeparator = filename.lastIndexOf('.');
-        if (extensionSeparator < 0 || extensionSeparator == filename.length() - 1) {
-            return null;
-        }
-        String extension = filename.substring(extensionSeparator + 1).toLowerCase(Locale.ROOT);
-        return MIME_TYPES_BY_EXTENSION.get(extension);
     }
 
-    private String sha256Hex(byte[] bytes) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(bytes);
-        StringBuilder builder = new StringBuilder(hash.length * 2);
-        for (byte value : hash) {
-            builder.append(String.format("%02x", value));
-        }
-        return builder.toString();
+    private boolean holdsMessages(Folder folder) throws MessagingException {
+        return (folder.getType() & Folder.HOLDS_MESSAGES) != 0;
     }
 
-    private void updateUidConfig(MailServerProperties.Imap config, long uid, long uidValidity) {
+    private boolean isSkippedHistoryFolder(String folderName) {
+        String normalized = folderName == null ? "" : folderName.toLowerCase(Locale.ROOT);
+        return SKIPPED_HISTORY_FOLDERS.stream().anyMatch(normalized::contains);
+    }
 
-        String userName = config.getUserName();
-        String host = config.getHost();
-        Integer port = config.getPort();
+    private SearchTerm recentMessages(LocalDateTime cutoff) {
+        Date cutoffDate = Date.from(cutoff.atZone(ZoneId.systemDefault()).toInstant());
+        return new OrTerm(
+                new ReceivedDateTerm(ComparisonTerm.GE, cutoffDate),
+                new SentDateTerm(ComparisonTerm.GE, cutoffDate)
+        );
+    }
 
+    private void prefetch(Folder folder, Message[] messages) throws MessagingException {
+        FetchProfile fetchProfile = new FetchProfile();
+        fetchProfile.add(FetchProfile.Item.ENVELOPE);
+        fetchProfile.add(FetchProfile.Item.FLAGS);
+        folder.fetch(messages, fetchProfile);
+    }
 
-        // 根据IMAP配置信息查找对应的邮箱账户并更新最后同步的UID
-        MailAccount account = new MailAccount();
-        account.setEmail(userName);
-        account.setImapHost(host);
-        account.setImapPort(port);
-
-        // 查找已存在的账户记录
-        LambdaQueryWrapper<MailAccount> wrapper = Wrappers.lambdaQuery(MailAccount.class)
-                .eq(MailAccount::getEmail, userName)
-                .eq(MailAccount::getImapHost, host)
-                .eq(MailAccount::getImapPort, port);
-
-        MailAccount existingAccount = mailAccountMapper.selectOne(wrapper);
-
-        if (existingAccount != null) {
-            // 更新已存在的账户
-            existingAccount.setLastSyncUid(uid);
-            existingAccount.setUidValidity(uidValidity);
-            existingAccount.setLastSyncAt(LocalDateTime.now());
-            mailAccountMapper.updateById(existingAccount);
-        } else {
-            // 创建新账户记录
-            MailAccount newAccount = new MailAccount();
-            newAccount.setEmail(config.getUserName());
-            newAccount.setImapHost(config.getHost());
-            newAccount.setImapPort(config.getPort());
-            newAccount.setUsername(config.getUserName());
-            newAccount.setLastSyncAt(LocalDateTime.now());
-            newAccount.setLastSyncUid(uid);
-            newAccount.setUidValidity(uidValidity);
-            // 注意：出于安全考虑，这里不存储密码，实际生产中应该只存储账户标识信息
-            mailAccountMapper.insert(newAccount);
+    private List<MessageWithUid> messagesAfterUid(UIDFolder uidFolder, Message[] messages, long lastUid)
+            throws MessagingException {
+        List<MessageWithUid> results = new ArrayList<>();
+        Set<Long> seenUids = new HashSet<>();
+        for (Message message : messages) {
+            long uid = uidFolder.getUID(message);
+            if (uid > lastUid && seenUids.add(uid)) {
+                results.add(new MessageWithUid(message, uid));
+            }
         }
+        results.sort(Comparator.comparingLong(MessageWithUid::uid));
+        return results;
     }
 
     private Long getLastSyncUid(MailServerProperties.Imap config) {
-        // 根据IMAP配置信息查找对应的邮箱账户的最后同步UID
-
         MailAccount account = mailAccountMapper.selectOne(
                 Wrappers.lambdaQuery(MailAccount.class)
                         .eq(MailAccount::getEmail, config.getUserName())
                         .eq(MailAccount::getImapHost, config.getHost())
                         .eq(MailAccount::getImapPort, config.getPort())
         );
-
-        if (account != null) {
-            Long uid = account.getLastSyncUid();
-            return uid == null ? 0L : uid;
-        }
-        return null;
+        return account == null || account.getLastSyncUid() == null ? null : account.getLastSyncUid();
     }
 
+    private void updateUidConfig(MailServerProperties.Imap config, long uid, long uidValidity) {
+        LambdaQueryWrapper<MailAccount> wrapper = Wrappers.lambdaQuery(MailAccount.class)
+                .eq(MailAccount::getEmail, config.getUserName())
+                .eq(MailAccount::getImapHost, config.getHost())
+                .eq(MailAccount::getImapPort, config.getPort());
+        MailAccount account = mailAccountMapper.selectOne(wrapper);
+        if (account == null) {
+            account = new MailAccount();
+            account.setEmail(config.getUserName());
+            account.setImapHost(config.getHost());
+            account.setImapPort(config.getPort());
+            account.setUsername(config.getUserName());
+            account.setUseSsl(config.isSsl() ? 1 : 0);
+            account.setHistorySynced(0);
+            account.setIsDeleted(0);
+            account.setCreatedAt(LocalDateTime.now());
+            account.setPassword("0");
+            account.setLastSyncUid(uid);
+            account.setUidValidity(uidValidity);
+            account.setLastSyncAt(LocalDateTime.now());
+            mailAccountMapper.insert(account);
+            return;
+        }
+        account.setLastSyncUid(uid);
+        account.setUidValidity(uidValidity);
+        account.setLastSyncAt(LocalDateTime.now());
+        mailAccountMapper.updateById(account);
+    }
 
+    private long nullToZero(Long value) {
+        return value == null ? 0 : value;
+    }
+
+    private record MessageWithUid(Message message, long uid) {
+    }
 }
