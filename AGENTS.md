@@ -72,3 +72,17 @@ Keep JWT secrets, database passwords, mail credentials, Langfuse credentials, an
 For this repository, do not ask the user to repeat Langfuse credential locations in every chat. The canonical credential source is the repository root `.env` file (loaded via `spring.config.import`), using environment variable keys `APP_LANGFUSE_URL`, `APP_LANGFUSE_PUBLIC_KEY`, `APP_LANGFUSE_SECRET_KEY`, plus prompt/trace metadata keys `APP_LANGFUSE_PROMPT_NAME`, `APP_LANGFUSE_PROMPT_LABEL`, `APP_LANGFUSE_PROMPT_VERSION`, `APP_LANGFUSE_TRACE_NAME`, and `APP_LANGFUSE_ENVIRONMENT`. Reference only key names and file path; never request or echo plaintext credential values in chat.
 
 For library, SDK, CLI, framework, or cloud-service questions, fetch current docs through Context7 or the available docs tooling before answering from memory. In this repository, prefer `rg`/Cursor search tools for code search over manual shell grep-style workflows.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues; external PRs are not a triage request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default triage label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use a single-context domain docs layout. See `docs/agents/domain.md`.
