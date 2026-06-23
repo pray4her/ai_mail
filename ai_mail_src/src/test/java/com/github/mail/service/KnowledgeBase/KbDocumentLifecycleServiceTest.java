@@ -15,6 +15,7 @@ import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -52,6 +53,7 @@ class KbDocumentLifecycleServiceTest {
         DocumentDTO uploaded = uploadedDocument(42L);
         KbDocument document = document(42L, "guide.pdf", 0);
 
+        when(documentService.findDocumentByContent(file)).thenReturn(Optional.empty());
         when(documentService.uploadDocument(file, "operator", List.of("policy"))).thenReturn(uploaded);
         when(documentService.getDocumentById(42L)).thenReturn(document);
         when(storageService.downloadFile("documents/42/original.pdf")).thenReturn(new ByteArrayInputStream("raw".getBytes()));
@@ -81,6 +83,7 @@ class KbDocumentLifecycleServiceTest {
         DocumentDTO uploaded = uploadedDocument(43L);
         KbDocument document = document(43L, "broken.pdf", 0);
 
+        when(documentService.findDocumentByContent(file)).thenReturn(Optional.empty());
         when(documentService.uploadDocument(file, "operator", List.of())).thenReturn(uploaded);
         when(documentService.getDocumentById(43L)).thenReturn(document);
         when(storageService.downloadFile("documents/43/original.pdf")).thenReturn(new ByteArrayInputStream("raw".getBytes()));
@@ -107,6 +110,7 @@ class KbDocumentLifecycleServiceTest {
         DocumentDTO uploaded = uploadedDocument(45L);
         KbDocument document = document(45L, "partial.pdf", 0);
 
+        when(documentService.findDocumentByContent(file)).thenReturn(Optional.empty());
         when(documentService.uploadDocument(file, "operator", List.of())).thenReturn(uploaded);
         when(documentService.getDocumentById(45L)).thenReturn(document);
         when(storageService.downloadFile("documents/45/original.pdf")).thenReturn(new ByteArrayInputStream("raw".getBytes()));
@@ -140,6 +144,25 @@ class KbDocumentLifecycleServiceTest {
         verify(storageService, never()).downloadFile(any());
         verify(chunkingService, never()).chunkDocument(44L);
         verify(embeddingService, never()).embedDocument(44L);
+    }
+
+    @Test
+    void uploadAndProcess_returnsDuplicateWithoutCreatingDerivedResourcesForExistingContent() throws Exception {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        MockMultipartFile file = new MockMultipartFile("file", "copy.pdf", "application/pdf", "same".getBytes());
+        KbDocument existingDocument = document(46L, "guide.pdf", 2);
+
+        when(documentService.findDocumentByContent(file)).thenReturn(Optional.of(existingDocument));
+
+        KbDocumentLifecycleResult result = lifecycleService.uploadAndProcess(file, "operator", List.of("policy"));
+
+        assertEquals(KbDocumentLifecycleOutcome.DUPLICATE, result.outcome());
+        assertEquals(46L, result.documentId());
+        assertEquals(KbDocumentLifecycleStatus.VECTORIZED, result.status());
+        verify(documentService, never()).uploadDocument(file, "operator", List.of("policy"));
+        verify(storageService, never()).downloadFile(any());
+        verify(chunkingService, never()).chunkDocument(46L);
+        verify(embeddingService, never()).embedDocument(46L);
     }
 
     private KbDocumentLifecycleService lifecycleService() {

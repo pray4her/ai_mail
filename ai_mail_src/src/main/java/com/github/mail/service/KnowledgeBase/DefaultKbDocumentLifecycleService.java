@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -39,6 +40,16 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
             String author,
             List<String> tags
     ) throws IOException {
+        Optional<KbDocument> existingDocument = documentService.findDocumentByContent(file);
+        if (existingDocument.isPresent()) {
+            KbDocument document = existingDocument.get();
+            KbDocumentLifecycleStatus status = KbDocumentLifecycleStatus.fromCode(document.getStatus());
+            return KbDocumentLifecycleResult.duplicate(
+                    document.getId(),
+                    status,
+                    "知识库文档内容已存在"
+            );
+        }
         DocumentDTO uploaded = documentService.uploadDocument(file, author, tags);
         return processExistingDocument(uploaded.getId());
     }

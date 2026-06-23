@@ -39,4 +39,19 @@ public record KbDocumentLifecycleResult(
                 message
         );
     }
+
+    public static KbDocumentLifecycleResult duplicate(
+            Long documentId,
+            KbDocumentLifecycleStatus status,
+            String message
+    ) {
+        return new KbDocumentLifecycleResult(
+                KbDocumentLifecycleOutcome.DUPLICATE,
+                documentId,
+                status,
+                0,
+                0,
+                message
+        );
+    }
 }

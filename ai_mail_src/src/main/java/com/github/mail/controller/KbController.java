@@ -131,6 +131,7 @@ public class KbController {
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
+            response.put("outcome", result.outcome());
             response.put("documentId", result.documentId());
             response.put("fileName", file.getOriginalFilename());
             response.put("chunkCount", result.chunkCount());

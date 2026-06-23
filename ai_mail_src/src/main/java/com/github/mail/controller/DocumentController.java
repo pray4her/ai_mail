@@ -92,6 +92,7 @@ public class DocumentController {
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
+            response.put("outcome", result.outcome());
             response.put("message", result.message());
             response.put("data", result);
 

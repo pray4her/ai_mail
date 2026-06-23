@@ -32,6 +32,7 @@ import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -119,11 +120,8 @@ public class KbDocumentService {
         String fileMd5 = DigestUtils.md5DigestAsHex(fileBytes);
 
         // 2. 检查文件是否已存在
-        LambdaQueryWrapper<KbDocument> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(KbDocument::getFileMd5, fileMd5);
-        KbDocument existingDoc = kbDocumentMapper.selectOne(queryWrapper);
-
-        if (existingDoc != null) {
+        Optional<KbDocument> existingDocument = findDocumentByMd5(fileMd5);
+        if (existingDocument.isPresent()) {
             log.warn("文件已存在，MD5: {}", fileMd5);
             throw new RuntimeException("文件已存在");
         }
@@ -182,6 +180,11 @@ public class KbDocumentService {
         DocumentDTO dto = convertToDTO(document);
         dto.setTags(tags != null ? tags : new ArrayList<>());
         return dto;
+    }
+
+    public Optional<KbDocument> findDocumentByContent(MultipartFile file) throws IOException {
+        String fileMd5 = DigestUtils.md5DigestAsHex(file.getBytes());
+        return findDocumentByMd5(fileMd5);
     }
 
     /**
@@ -287,6 +290,12 @@ public class KbDocumentService {
             documentTag.setTagId(tag.getId());
             documentTagMapper.insert(documentTag);
         }
+    }
+
+    private Optional<KbDocument> findDocumentByMd5(String fileMd5) {
+        LambdaQueryWrapper<KbDocument> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(KbDocument::getFileMd5, fileMd5);
+        return Optional.ofNullable(kbDocumentMapper.selectOne(queryWrapper));
     }
 
     /**
