@@ -69,4 +69,19 @@ public record KbDocumentLifecycleResult(
                 message
         );
     }
+
+    public static KbDocumentLifecycleResult notFound(
+            Long documentId,
+            KbDocumentLifecycleStatus status,
+            String message
+    ) {
+        return new KbDocumentLifecycleResult(
+                KbDocumentLifecycleOutcome.NOT_FOUND,
+                documentId,
+                status,
+                0,
+                0,
+                message
+        );
+    }
 }

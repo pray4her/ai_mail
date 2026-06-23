@@ -1,9 +1,16 @@
 package com.github.mail.service.KnowledgeBase;
 
 import com.github.mail.model.config.Properties.MinIOProperties;
+import com.github.mail.repo.KbDocument.domain.DocumentTag;
 import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.repo.KbDocument.dto.DocumentDTO;
+import com.github.mail.repo.KbDocument.mapper.DocumentTagMapper;
 import com.github.mail.repo.KbDocument.mapper.KbDocumentMapper;
+import com.github.mail.repo.KnowledgeBase.dao.ElasticsearchChunkIndexRepository;
+import com.github.mail.repo.KnowledgeBase.domain.KbDocumentChunk;
+import com.github.mail.repo.KnowledgeBase.domain.KbVectorIndex;
+import com.github.mail.repo.KnowledgeBase.mapper.KbDocumentChunkMapper;
+import com.github.mail.repo.KnowledgeBase.mapper.KbVectorIndexMapper;
 import com.github.mail.service.File.MinioStorageService;
 import com.github.mail.utils.TikaDocumentParser;
 import org.junit.jupiter.api.Test;
@@ -25,6 +32,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 @ExtendWith(MockitoExtension.class)
 class KbDocumentLifecycleServiceTest {
@@ -34,6 +42,18 @@ class KbDocumentLifecycleServiceTest {
 
     @Mock
     private KbDocumentMapper documentMapper;
+
+    @Mock
+    private KbDocumentChunkMapper chunkMapper;
+
+    @Mock
+    private KbVectorIndexMapper vectorIndexMapper;
+
+    @Mock
+    private DocumentTagMapper documentTagMapper;
+
+    @Mock
+    private ElasticsearchChunkIndexRepository esRepository;
 
     @Mock
     private KbChunkingService chunkingService;
@@ -257,6 +277,89 @@ class KbDocumentLifecycleServiceTest {
         verify(embeddingService, never()).embedDocument(46L);
     }
 
+    @Test
+    void deleteDocument_removesDocumentAndDerivedResourcesThroughLifecycle() {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        KbDocument document = document(50L, "obsolete.pdf", 2);
+
+        when(documentMapper.selectById(50L)).thenReturn(document);
+        when(chunkMapper.selectObjs(any())).thenReturn(List.of(500L, 501L));
+        when(esRepository.deleteChunksByDocumentId(50L)).thenReturn(2);
+
+        KbDocumentLifecycleResult result = lifecycleService.deleteDocument(50L);
+
+        assertEquals(KbDocumentLifecycleOutcome.SUCCESS, result.outcome());
+        assertEquals(50L, result.documentId());
+        assertEquals(KbDocumentLifecycleStatus.FAILED, result.status());
+        verify(esRepository).deleteChunksByDocumentId(50L);
+        verify(storageService).deleteDocumentFolder(50L);
+        verify(vectorIndexMapper).delete(any());
+        verify(documentTagMapper).delete(any());
+        verify(chunkMapper).delete(any());
+        verify(documentMapper).deleteById(50L);
+    }
+
+    @Test
+    void deleteDocument_treatsMissingExternalResourcesAsSafeAndIdempotent() {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        KbDocument document = document(51L, "already-clean.pdf", 9);
+
+        when(documentMapper.selectById(51L)).thenReturn(document);
+        when(chunkMapper.selectObjs(any())).thenReturn(List.of());
+        when(esRepository.deleteChunksByDocumentId(51L)).thenReturn(0);
+
+        KbDocumentLifecycleResult result = lifecycleService.deleteDocument(51L);
+
+        assertEquals(KbDocumentLifecycleOutcome.SUCCESS, result.outcome());
+        verify(esRepository).deleteChunksByDocumentId(51L);
+        verify(storageService).deleteDocumentFolder(51L);
+        verify(vectorIndexMapper, never()).delete(any());
+        verify(documentMapper).deleteById(51L);
+    }
+
+    @Test
+    void deleteDocument_keepsFailedDocumentRetryableWhenExternalCleanupFails() {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        KbDocument document = document(52L, "needs-retry.pdf", 2);
+
+        when(documentMapper.selectById(52L)).thenReturn(document);
+        doThrow(new RuntimeException("minio unavailable"))
+                .when(storageService).deleteDocumentFolder(52L);
+        when(esRepository.deleteChunksByDocumentId(52L)).thenReturn(1);
+
+        KbDocumentLifecycleResult result = lifecycleService.deleteDocument(52L);
+
+        assertEquals(KbDocumentLifecycleOutcome.RETRYABLE_FAILURE, result.outcome());
+        assertEquals(KbDocumentLifecycleStatus.FAILED, result.status());
+        assertTrue(result.message().contains("对象存储清理失败"));
+        assertTrue(result.message().contains("minio unavailable"));
+        verify(documentMapper).updateById(document);
+        verify(vectorIndexMapper, never()).delete(any());
+        verify(documentTagMapper, never()).delete(any());
+        verify(chunkMapper, never()).delete(any());
+        verify(documentMapper, never()).deleteById(52L);
+        assertEquals(9, document.getStatus());
+    }
+
+    @Test
+    void cleanupFailedDocuments_reusesLifecycleDeletionPath() {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        KbDocument failedDocument = document(53L, "failed.pdf", 9);
+
+        when(documentMapper.selectList(any())).thenReturn(List.of(failedDocument));
+        when(documentMapper.selectById(53L)).thenReturn(failedDocument);
+        when(chunkMapper.selectObjs(any())).thenReturn(List.of(530L));
+        when(esRepository.deleteChunksByDocumentId(53L)).thenReturn(1);
+
+        List<KbDocumentLifecycleResult> results = lifecycleService.cleanupFailedDocuments();
+
+        assertEquals(1, results.size());
+        assertEquals(KbDocumentLifecycleOutcome.SUCCESS, results.get(0).outcome());
+        verify(esRepository).deleteChunksByDocumentId(53L);
+        verify(storageService).deleteDocumentFolder(53L);
+        verify(documentMapper).deleteById(53L);
+    }
+
     private KbDocumentLifecycleService lifecycleService() {
         MinIOProperties properties = new MinIOProperties();
         properties.setBucket("kb");
@@ -267,7 +370,11 @@ class KbDocumentLifecycleServiceTest {
                 embeddingService,
                 storageService,
                 properties,
-                documentParser
+                documentParser,
+                chunkMapper,
+                vectorIndexMapper,
+                documentTagMapper,
+                esRepository
         );
     }
 

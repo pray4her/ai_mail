@@ -5,6 +5,7 @@ import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.repo.KbDocument.dto.DocumentDTO;
 import com.github.mail.repo.KbDocument.dto.PageResponse;
 import com.github.mail.repo.KbDocument.dto.QueryParams;
+import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleOutcome;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleResult;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleService;
 import com.github.mail.service.KnowledgeBase.KbDocumentService;
@@ -117,12 +118,20 @@ public class DocumentController {
     public ResponseEntity<Map<String, Object>> deleteDocument(@PathVariable Long id) {
         try {
             KbDocumentLifecycleResult result = lifecycleService.deleteDocument(id);
+            boolean deleted = result.outcome() == KbDocumentLifecycleOutcome.SUCCESS
+                    || result.outcome() == KbDocumentLifecycleOutcome.NOT_FOUND;
 
             Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
+            response.put("success", deleted);
+            response.put("documentId", result.documentId());
+            response.put("outcome", result.outcome());
+            response.put("status", result.status());
             response.put("message", result.message());
 
-            return ResponseEntity.ok(response);
+            if (deleted) {
+                return ResponseEntity.ok(response);
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
 
         } catch (RuntimeException e) {
             log.error("文档删除失败", e);

@@ -1,6 +1,7 @@
 package com.github.mail.controller;
 
 import com.github.mail.repo.KbDocument.domain.KbDocument;
+import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleOutcome;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleResult;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleService;
 import com.github.mail.service.KnowledgeBase.KbDocumentService;
@@ -181,13 +182,20 @@ public class KbController {
 
         try {
             KbDocumentLifecycleResult result = lifecycleService.deleteDocument(documentId);
+            boolean deleted = result.outcome() == KbDocumentLifecycleOutcome.SUCCESS
+                    || result.outcome() == KbDocumentLifecycleOutcome.NOT_FOUND;
 
             Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("documentId", documentId);
+            response.put("success", deleted);
+            response.put("documentId", result.documentId());
+            response.put("outcome", result.outcome());
+            response.put("status", result.status());
             response.put("message", result.message());
 
-            return ResponseEntity.ok(response);
+            if (deleted) {
+                return ResponseEntity.ok(response);
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
 
         } catch (Exception e) {
             log.error("Failed to delete document: {}", documentId, e);

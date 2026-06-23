@@ -1,10 +1,18 @@
 package com.github.mail.service.KnowledgeBase;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.github.mail.model.config.Properties.MinIOProperties;
+import com.github.mail.repo.KbDocument.domain.DocumentTag;
 import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.repo.KbDocument.dto.DocumentDTO;
 import com.github.mail.repo.KbDocument.mapper.KbDocumentMapper;
+import com.github.mail.repo.KbDocument.mapper.DocumentTagMapper;
+import com.github.mail.repo.KnowledgeBase.dao.ElasticsearchChunkIndexRepository;
+import com.github.mail.repo.KnowledgeBase.domain.KbDocumentChunk;
+import com.github.mail.repo.KnowledgeBase.domain.KbVectorIndex;
+import com.github.mail.repo.KnowledgeBase.mapper.KbDocumentChunkMapper;
+import com.github.mail.repo.KnowledgeBase.mapper.KbVectorIndexMapper;
 import com.github.mail.service.File.MinioStorageService;
 import com.github.mail.utils.PathUtil;
 import com.github.mail.utils.TikaDocumentParser;
@@ -17,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,6 +41,10 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
     private final MinioStorageService storageService;
     private final MinIOProperties minIOProperties;
     private final TikaDocumentParser documentParser;
+    private final KbDocumentChunkMapper chunkMapper;
+    private final KbVectorIndexMapper vectorIndexMapper;
+    private final DocumentTagMapper documentTagMapper;
+    private final ElasticsearchChunkIndexRepository esRepository;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -61,9 +74,30 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public KbDocumentLifecycleResult deleteDocument(Long documentId) {
         try {
-            documentService.deleteDocument(documentId);
+            KbDocument document = documentMapper.selectById(documentId);
+            if (document == null) {
+                return KbDocumentLifecycleResult.notFound(
+                        documentId,
+                        KbDocumentLifecycleStatus.FAILED,
+                        "知识库文档不存在，删除已跳过"
+                );
+            }
+
+            List<String> cleanupFailures = cleanupExternalResources(documentId);
+            if (!cleanupFailures.isEmpty()) {
+                markStatus(document, KbDocumentLifecycleStatus.FAILED);
+                documentMapper.updateById(document);
+                return KbDocumentLifecycleResult.failure(
+                        documentId,
+                        KbDocumentLifecycleStatus.FAILED,
+                        "知识库文档清理失败: " + String.join("; ", cleanupFailures)
+                );
+            }
+
+            deleteDatabaseResources(documentId);
             return KbDocumentLifecycleResult.success(
                     documentId,
                     KbDocumentLifecycleStatus.FAILED,
@@ -223,5 +257,38 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
 
     private void markStatus(KbDocument document, KbDocumentLifecycleStatus status) {
         document.setStatus(status.code());
+    }
+
+    private List<String> cleanupExternalResources(Long documentId) {
+        List<String> failures = new ArrayList<>();
+        try {
+            esRepository.deleteChunksByDocumentId(documentId);
+        } catch (RuntimeException exception) {
+            failures.add("ES清理失败(" + exception.getMessage() + ")");
+        }
+        try {
+            storageService.deleteDocumentFolder(documentId);
+        } catch (RuntimeException exception) {
+            failures.add("对象存储清理失败(" + exception.getMessage() + ")");
+        }
+        return failures;
+    }
+
+    private void deleteDatabaseResources(Long documentId) {
+        List<Long> chunkIds = chunkMapper.selectObjs(
+                new QueryWrapper<KbDocumentChunk>()
+                        .select("id")
+                        .eq("document_id", documentId)
+        );
+
+        if (!chunkIds.isEmpty()) {
+            vectorIndexMapper.delete(new QueryWrapper<KbVectorIndex>()
+                    .in("chunk_id", chunkIds));
+        }
+        documentTagMapper.delete(new QueryWrapper<DocumentTag>()
+                .eq("document_id", documentId));
+        chunkMapper.delete(new QueryWrapper<KbDocumentChunk>()
+                .eq("document_id", documentId));
+        documentMapper.deleteById(documentId);
     }
 }
