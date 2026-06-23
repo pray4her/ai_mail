@@ -13,12 +13,7 @@ import com.github.mail.repo.KbDocument.dto.QueryParams;
 import com.github.mail.repo.KbDocument.mapper.DocumentTagMapper;
 import com.github.mail.repo.KbDocument.mapper.KbDocumentMapper;
 import com.github.mail.repo.KbDocument.mapper.TagMapper;
-import com.github.mail.repo.KnowledgeBase.domain.KbDocumentChunk;
-import com.github.mail.repo.KnowledgeBase.domain.KbVectorIndex;
-import com.github.mail.repo.KnowledgeBase.mapper.KbDocumentChunkMapper;
-import com.github.mail.repo.KnowledgeBase.mapper.KbVectorIndexMapper;
 import com.github.mail.service.File.MinioStorageService;
-import com.github.mail.repo.KnowledgeBase.dao.ElasticsearchChunkIndexRepository;
 import com.github.mail.utils.PathUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,13 +42,10 @@ import java.util.stream.Collectors;
 public class KbDocumentService {
 
     private final KbDocumentMapper kbDocumentMapper;
-    private final KbDocumentChunkMapper kbDocumentChunkMapper;
     private final TagMapper tagMapper;
     private final DocumentTagMapper documentTagMapper;
     private final MinioStorageService minioStorageService;
     private final MinIOProperties minIOProperties;
-    private final ElasticsearchChunkIndexRepository esVectorService;
-    private final KbVectorIndexMapper kbVectorIndexMapper;
 
     /**
      * 分页查询文档
@@ -87,28 +79,6 @@ public class KbDocumentService {
                 (int) result.getCurrent()
         );
     }
-
-    /**
-     * 文档处理状态
-     * 0 = 上传中
-     * 1 = 已解析（Tika 解析完成）(完成分片)
-     * 2 = 已向量化（embedding 完成）
-     * 9 = 失败
-     */
-    //查询未向量化的chunk
-    public List<KbDocument> queryUnvectorizedDocuments() {
-        LambdaQueryWrapper<KbDocument> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.or().eq(KbDocument::getStatus, 1);
-        return kbDocumentMapper.selectList(queryWrapper);
-    }
-
-    //查询未解析的文档
-    public List<KbDocument> queryUnparsedDocuments() {
-        LambdaQueryWrapper<KbDocument> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.or().eq(KbDocument::getStatus, 0);
-        return kbDocumentMapper.selectList(queryWrapper);
-    }
-
 
     /**
      * 上传文档 只存minio
@@ -185,48 +155,6 @@ public class KbDocumentService {
     public Optional<KbDocument> findDocumentByContent(MultipartFile file) throws IOException {
         String fileMd5 = DigestUtils.md5DigestAsHex(file.getBytes());
         return findDocumentByMd5(fileMd5);
-    }
-
-    /**
-     * 删除文档
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public void deleteDocument(Long documentId) {
-        KbDocument document = kbDocumentMapper.selectById(documentId);
-        if (document == null) {
-            return;
-        }
-
-        // 1. 先删除从表（MySQL）
-        // 查询该文档下的所有 chunkId
-        List<Long> chunkIds = kbDocumentChunkMapper.selectObjs(
-                new LambdaQueryWrapper<KbDocumentChunk>()
-                        .select(KbDocumentChunk::getId)
-                        .eq(KbDocumentChunk::getDocumentId, documentId)
-        );
-
-        // 删除向量表
-        if (!chunkIds.isEmpty()) {
-            kbVectorIndexMapper.delete(
-                    new LambdaQueryWrapper<KbVectorIndex>()
-                            .in(KbVectorIndex::getChunkId, chunkIds)
-            );
-        }
-
-        documentTagMapper.delete(new LambdaQueryWrapper<DocumentTag>().eq(DocumentTag::getDocumentId, documentId));
-        kbDocumentChunkMapper.delete(new LambdaQueryWrapper<KbDocumentChunk>().eq(KbDocumentChunk::getDocumentId, documentId));
-
-        // 2. 删除主记录（MySQL）
-        kbDocumentMapper.deleteById(documentId);
-
-        // 3. 数据库执行成功后，尝试清理外部资源
-        try {
-            esVectorService.deleteChunksByDocumentId(documentId);
-            minioStorageService.deleteDocumentFolder(documentId);
-        } catch (Exception e) {
-            log.error("外部资源清理失败，需人工介入或定时任务补偿: {}", documentId, e);
-            // 这里可以考虑记录到一条 "清理失败任务表" 中
-        }
     }
 
     /**

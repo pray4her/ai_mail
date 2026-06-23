@@ -4,7 +4,6 @@ import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleOutcome;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleResult;
 import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleService;
-import com.github.mail.service.KnowledgeBase.KbDocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -39,7 +38,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class KbController {
 
-    private final KbDocumentService documentService;
     private final KbDocumentLifecycleService lifecycleService;
 
 
@@ -160,7 +158,7 @@ public class KbController {
     @GetMapping("/{documentId}")
     public ResponseEntity<KbDocument> getDocument(@PathVariable Long documentId) {
         try {
-            KbDocument document = documentService.getDocumentById(documentId);
+            KbDocument document = lifecycleService.getDocument(documentId);
             if (document == null) {
                 return ResponseEntity.notFound().build();
             }

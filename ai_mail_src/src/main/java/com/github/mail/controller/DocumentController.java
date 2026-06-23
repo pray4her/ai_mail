@@ -60,7 +60,7 @@ public class DocumentController {
         params.setSize(size);
         params.setKeyword(keyword);
 
-        PageResponse<DocumentDTO> result = kbDocumentService.queryDocuments(params);
+        PageResponse<DocumentDTO> result = lifecycleService.queryDocuments(params);
         return ResponseEntity.ok(result);
     }
 

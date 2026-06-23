@@ -6,6 +6,8 @@ import com.github.mail.model.config.Properties.MinIOProperties;
 import com.github.mail.repo.KbDocument.domain.DocumentTag;
 import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.repo.KbDocument.dto.DocumentDTO;
+import com.github.mail.repo.KbDocument.dto.PageResponse;
+import com.github.mail.repo.KbDocument.dto.QueryParams;
 import com.github.mail.repo.KbDocument.mapper.KbDocumentMapper;
 import com.github.mail.repo.KbDocument.mapper.DocumentTagMapper;
 import com.github.mail.repo.KnowledgeBase.dao.ElasticsearchChunkIndexRepository;
@@ -121,8 +123,18 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
     }
 
     @Override
+    public PageResponse<DocumentDTO> queryDocuments(QueryParams params) {
+        return documentService.queryDocuments(params);
+    }
+
+    @Override
+    public KbDocument getDocument(Long documentId) {
+        return documentService.getDocumentById(documentId);
+    }
+
+    @Override
     public KbDocumentLifecycleStatus getStatus(Long documentId) {
-        KbDocument document = documentService.getDocumentById(documentId);
+        KbDocument document = getDocument(documentId);
         return KbDocumentLifecycleStatus.fromCode(document.getStatus());
     }
 

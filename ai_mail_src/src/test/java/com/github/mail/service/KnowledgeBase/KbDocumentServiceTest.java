@@ -8,9 +8,6 @@ import com.github.mail.repo.KbDocument.dto.DocumentDTO;
 import com.github.mail.repo.KbDocument.mapper.DocumentTagMapper;
 import com.github.mail.repo.KbDocument.mapper.KbDocumentMapper;
 import com.github.mail.repo.KbDocument.mapper.TagMapper;
-import com.github.mail.repo.KnowledgeBase.dao.ElasticsearchChunkIndexRepository;
-import com.github.mail.repo.KnowledgeBase.mapper.KbDocumentChunkMapper;
-import com.github.mail.repo.KnowledgeBase.mapper.KbVectorIndexMapper;
 import com.github.mail.service.File.MinioStorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,9 +30,6 @@ class KbDocumentServiceTest {
     private KbDocumentMapper documentMapper;
 
     @Mock
-    private KbDocumentChunkMapper chunkMapper;
-
-    @Mock
     private TagMapper tagMapper;
 
     @Mock
@@ -43,12 +37,6 @@ class KbDocumentServiceTest {
 
     @Mock
     private MinioStorageService storageService;
-
-    @Mock
-    private ElasticsearchChunkIndexRepository esRepository;
-
-    @Mock
-    private KbVectorIndexMapper vectorIndexMapper;
 
     @Test
     void uploadDocument_savesTagsAsDocumentMetadata() throws Exception {
@@ -94,13 +82,10 @@ class KbDocumentServiceTest {
         properties.setBucket("kb");
         return new KbDocumentService(
                 documentMapper,
-                chunkMapper,
                 tagMapper,
                 documentTagMapper,
                 storageService,
-                properties,
-                esRepository,
-                vectorIndexMapper
+                properties
         );
     }
 }
