@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayInputStream;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -128,6 +129,97 @@ class KbDocumentLifecycleServiceTest {
         verify(documentMapper, org.mockito.Mockito.atLeast(2)).updateById(failedDocument.capture());
         assertTrue(failedDocument.getAllValues().stream()
                 .anyMatch(doc -> Integer.valueOf(9).equals(doc.getStatus())));
+    }
+
+    @Test
+    void uploadAndProcess_marksDocumentFailedWhenChunkingFails() throws Exception {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        MockMultipartFile file = new MockMultipartFile("file", "chunk-fails.pdf", "application/pdf", "raw".getBytes());
+        DocumentDTO uploaded = uploadedDocument(47L);
+        KbDocument document = document(47L, "chunk-fails.pdf", 0);
+
+        when(documentService.findDocumentByContent(file)).thenReturn(Optional.empty());
+        when(documentService.uploadDocument(file, "operator", List.of())).thenReturn(uploaded);
+        when(documentService.getDocumentById(47L)).thenReturn(document);
+        when(storageService.downloadFile("documents/47/original.pdf")).thenReturn(new ByteArrayInputStream("raw".getBytes()));
+        when(documentParser.extractText(any(), eq("kb"))).thenReturn("parsed knowledge");
+        when(chunkingService.chunkDocument(47L)).thenThrow(new RuntimeException("chunker unavailable"));
+
+        KbDocumentLifecycleResult result = lifecycleService.uploadAndProcess(file, "operator", List.of());
+
+        assertEquals(KbDocumentLifecycleOutcome.RETRYABLE_FAILURE, result.outcome());
+        assertEquals(KbDocumentLifecycleStatus.FAILED, result.status());
+        assertTrue(result.message().contains("chunker unavailable"));
+        verify(embeddingService, never()).embedDocument(47L);
+
+        ArgumentCaptor<KbDocument> failedDocument = ArgumentCaptor.forClass(KbDocument.class);
+        verify(documentMapper, org.mockito.Mockito.atLeastOnce()).updateById(failedDocument.capture());
+        assertTrue(failedDocument.getAllValues().stream()
+                .anyMatch(doc -> Integer.valueOf(9).equals(doc.getStatus())));
+    }
+
+    @Test
+    void uploadAndProcess_marksDocumentFailedWhenEmbeddingOrIndexingFails() throws Exception {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        MockMultipartFile file = new MockMultipartFile("file", "embedding-fails.pdf", "application/pdf", "raw".getBytes());
+        DocumentDTO uploaded = uploadedDocument(48L);
+        KbDocument document = document(48L, "embedding-fails.pdf", 0);
+
+        when(documentService.findDocumentByContent(file)).thenReturn(Optional.empty());
+        when(documentService.uploadDocument(file, "operator", List.of())).thenReturn(uploaded);
+        when(documentService.getDocumentById(48L)).thenReturn(document);
+        when(storageService.downloadFile("documents/48/original.pdf")).thenReturn(new ByteArrayInputStream("raw".getBytes()));
+        when(documentParser.extractText(any(), eq("kb"))).thenReturn("parsed knowledge");
+        when(chunkingService.chunkDocument(48L)).thenReturn(2);
+        when(embeddingService.embedDocument(48L)).thenThrow(new RuntimeException("elasticsearch unavailable"));
+
+        KbDocumentLifecycleResult result = lifecycleService.uploadAndProcess(file, "operator", List.of());
+
+        assertEquals(KbDocumentLifecycleOutcome.RETRYABLE_FAILURE, result.outcome());
+        assertEquals(KbDocumentLifecycleStatus.FAILED, result.status());
+        assertTrue(result.message().contains("elasticsearch unavailable"));
+
+        ArgumentCaptor<KbDocument> failedDocument = ArgumentCaptor.forClass(KbDocument.class);
+        verify(documentMapper, org.mockito.Mockito.atLeastOnce()).updateById(failedDocument.capture());
+        assertTrue(failedDocument.getAllValues().stream()
+                .anyMatch(doc -> Integer.valueOf(9).equals(doc.getStatus())));
+    }
+
+    @Test
+    void retryProcessing_reusesParsedTextChunksAndVectorMappingsAfterPartialFailure() {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+        KbDocument document = document(49L, "partial-success.pdf", 9);
+        document.setParsedObjectKey("documents/49/parsed.txt");
+        document.setParsedAt(LocalDateTime.now());
+
+        when(documentService.getDocumentById(49L)).thenReturn(document);
+        when(chunkingService.chunkDocument(49L)).thenReturn(2);
+        when(embeddingService.embedDocument(49L)).thenReturn(2);
+
+        KbDocumentLifecycleResult result = lifecycleService.retryProcessing(49L);
+
+        assertEquals(KbDocumentLifecycleOutcome.SUCCESS, result.outcome());
+        assertEquals(KbDocumentLifecycleStatus.VECTORIZED, result.status());
+        assertEquals(2, result.chunkCount());
+        assertEquals(2, result.embeddedCount());
+        verify(storageService, never()).downloadFile(any());
+        verify(documentParser, never()).extractText(any(), any());
+    }
+
+    @Test
+    void retryProcessing_returnsTerminalFailureWhenDocumentDoesNotExist() {
+        KbDocumentLifecycleService lifecycleService = lifecycleService();
+
+        when(documentService.getDocumentById(404L)).thenThrow(new RuntimeException("文档不存在"));
+
+        KbDocumentLifecycleResult result = lifecycleService.retryProcessing(404L);
+
+        assertEquals(KbDocumentLifecycleOutcome.TERMINAL_FAILURE, result.outcome());
+        assertEquals(404L, result.documentId());
+        assertEquals(KbDocumentLifecycleStatus.FAILED, result.status());
+        assertTrue(result.message().contains("文档不存在"));
+        verify(chunkingService, never()).chunkDocument(404L);
+        verify(embeddingService, never()).embedDocument(404L);
     }
 
     @Test

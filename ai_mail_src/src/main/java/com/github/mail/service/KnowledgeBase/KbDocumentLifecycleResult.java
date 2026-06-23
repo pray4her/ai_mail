@@ -54,4 +54,19 @@ public record KbDocumentLifecycleResult(
                 message
         );
     }
+
+    public static KbDocumentLifecycleResult terminalFailure(
+            Long documentId,
+            KbDocumentLifecycleStatus status,
+            String message
+    ) {
+        return new KbDocumentLifecycleResult(
+                KbDocumentLifecycleOutcome.TERMINAL_FAILURE,
+                documentId,
+                status,
+                0,
+                0,
+                message
+        );
+    }
 }

@@ -108,7 +108,23 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
     }
 
     private KbDocumentLifecycleResult processExistingDocument(Long documentId) {
-        KbDocument document = documentService.getDocumentById(documentId);
+        KbDocument document;
+        try {
+            document = documentService.getDocumentById(documentId);
+        } catch (RuntimeException exception) {
+            log.warn(
+                    "知识库文档生命周期处理终止: documentId={}, errorType={}, message={}",
+                    documentId,
+                    exception.getClass().getSimpleName(),
+                    exception.getMessage()
+            );
+            return KbDocumentLifecycleResult.terminalFailure(
+                    documentId,
+                    KbDocumentLifecycleStatus.FAILED,
+                    exception.getMessage()
+            );
+        }
+
         KbDocumentLifecycleStatus currentStatus = KbDocumentLifecycleStatus.fromCode(document.getStatus());
         if (currentStatus == KbDocumentLifecycleStatus.VECTORIZED) {
             return KbDocumentLifecycleResult.success(
@@ -120,8 +136,11 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
             );
         }
         try {
-            if (currentStatus != KbDocumentLifecycleStatus.PARSED) {
+            if (currentStatus != KbDocumentLifecycleStatus.PARSED && !hasParsedText(document)) {
                 parseDocument(document);
+            } else if (currentStatus != KbDocumentLifecycleStatus.PARSED) {
+                markStatus(document, KbDocumentLifecycleStatus.PARSED);
+                documentMapper.updateById(document);
             }
             int chunkCount = chunkingService.chunkDocument(documentId);
             if (chunkCount == 0) {
@@ -156,6 +175,12 @@ public class DefaultKbDocumentLifecycleService implements KbDocumentLifecycleSer
                     exception.getMessage()
             );
         }
+    }
+
+    private boolean hasParsedText(KbDocument document) {
+        return document.getParsedObjectKey() != null
+                && !document.getParsedObjectKey().isBlank()
+                && document.getParsedAt() != null;
     }
 
     private void parseDocument(KbDocument document) {

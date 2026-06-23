@@ -19,6 +19,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -69,6 +70,36 @@ class KbEmbeddingServiceTest {
         assertEquals(2, embeddedCount);
         verify(embeddingService, never()).embedBatch(any());
         verify(esVectorService, never()).batchSaveChunks(any(), any());
+    }
+
+    @Test
+    void embedDocument_embedsOnlyChunksMissingVectorMappings() {
+        KbEmbeddingService service = new KbEmbeddingService(
+                chunkMapper,
+                vectorIndexMapper,
+                documentMapper,
+                embeddingService,
+                esVectorService,
+                new ObjectMapper()
+        );
+        KbDocument document = new KbDocument();
+        document.setId(13L);
+        document.setStatus(1);
+        KbDocumentChunk existingChunk = chunk(201L);
+        KbDocumentChunk pendingChunk = chunk(202L);
+        KbVectorIndex existingIndex = vectorIndex(201L);
+
+        when(documentMapper.selectById(13L)).thenReturn(document);
+        when(chunkMapper.selectByDocumentId(13L)).thenReturn(List.of(existingChunk, pendingChunk));
+        when(embeddingService.currentModel()).thenReturn("text-embedding-test");
+        when(vectorIndexMapper.selectList(anyVectorQuery())).thenReturn(List.of(existingIndex));
+        when(embeddingService.embedBatch(List.of("knowledge 202"))).thenReturn(List.of(new float[]{0.2F, 0.3F}));
+        when(esVectorService.batchSaveChunks(any(), any())).thenReturn(1);
+
+        int embeddedCount = service.embedDocument(13L);
+
+        assertEquals(2, embeddedCount);
+        verify(esVectorService).batchSaveChunks(eq(List.of(pendingChunk)), any());
     }
 
     private static KbDocumentChunk chunk(Long id) {
