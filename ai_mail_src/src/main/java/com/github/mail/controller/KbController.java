@@ -1,10 +1,9 @@
 package com.github.mail.controller;
 
 import com.github.mail.repo.KbDocument.domain.KbDocument;
-import com.github.mail.repo.KbDocument.dto.DocumentDTO;
-import com.github.mail.service.KnowledgeBase.KbChunkingService;
+import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleResult;
+import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleService;
 import com.github.mail.service.KnowledgeBase.KbDocumentService;
-import com.github.mail.service.KnowledgeBase.KbEmbeddingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -40,8 +39,7 @@ import java.util.Map;
 public class KbController {
 
     private final KbDocumentService documentService;
-    private final KbChunkingService chunkingService;
-    private final KbEmbeddingService embeddingService;
+    private final KbDocumentLifecycleService lifecycleService;
 
 
     /**
@@ -56,16 +54,15 @@ public class KbController {
         log.info("Chunking document: {}, strategy: {}", documentId, strategy);
 
         try {
-//            KbChunkingService.ChunkStrategy chunkStrategy =
-//                    KbChunkingService.ChunkStrategy.valueOf(strategy);
-
-            int chunkCount = chunkingService.chunkDocument(documentId);
+            KbDocumentLifecycleResult result = lifecycleService.retryProcessing(documentId);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("documentId", documentId);
-            response.put("chunkCount", chunkCount);
+            response.put("chunkCount", result.chunkCount());
             response.put("strategy", strategy);
+            response.put("status", result.status());
+            response.put("message", result.message());
 
             return ResponseEntity.ok(response);
 
@@ -89,12 +86,14 @@ public class KbController {
         log.info("Embedding document: {}", documentId);
 
         try {
-            int embeddedCount = embeddingService.embedDocument(documentId);
+            KbDocumentLifecycleResult result = lifecycleService.retryProcessing(documentId);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("documentId", documentId);
-            response.put("embeddedChunks", embeddedCount);
+            response.put("embeddedChunks", result.embeddedCount());
+            response.put("status", result.status());
+            response.put("message", result.message());
 
             return ResponseEntity.ok(response);
 
@@ -128,28 +127,16 @@ public class KbController {
                         .body(Map.of("error", "文件不能为空"));
             }
 
-            // 第一步：上传并解析
-            DocumentDTO document = documentService.uploadDocument(file, userId, tags);
-            Long documentId = document.getId();
-            log.info("Document uploaded: {}", documentId);
-
-            // 第二步：分片
-//            KbChunkingService.ChunkStrategy chunkStrategy =
-//                    KbChunkingService.ChunkStrategy.valueOf(strategy);
-            int chunkCount = chunkingService.chunkDocument(documentId);
-            log.info("Document chunked: {} chunks", chunkCount);
-
-            // 第三步：向量化
-            int embeddedCount = embeddingService.embedDocument(documentId);
-            log.info("Document embedded: {} chunks", embeddedCount);
+            KbDocumentLifecycleResult result = lifecycleService.uploadAndProcess(file, userId, tags);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("documentId", documentId);
+            response.put("documentId", result.documentId());
             response.put("fileName", file.getOriginalFilename());
-            response.put("chunkCount", chunkCount);
-            response.put("embeddedChunks", embeddedCount);
-            response.put("message", "Document processed successfully (uploaded → chunked → embedded)");
+            response.put("chunkCount", result.chunkCount());
+            response.put("embeddedChunks", result.embeddedCount());
+            response.put("status", result.status());
+            response.put("message", result.message());
 
             return ResponseEntity.ok(response);
 
@@ -192,12 +179,12 @@ public class KbController {
         log.info("Deleting document: {}", documentId);
 
         try {
-            documentService.deleteDocument(documentId);
+            KbDocumentLifecycleResult result = lifecycleService.deleteDocument(documentId);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("documentId", documentId);
-            response.put("message", "Document deleted successfully");
+            response.put("message", result.message());
 
             return ResponseEntity.ok(response);
 

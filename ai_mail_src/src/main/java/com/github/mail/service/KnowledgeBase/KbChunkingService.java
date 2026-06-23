@@ -68,6 +68,12 @@ public class KbChunkingService {
             return 0;
         }
 
+        List<KbDocumentChunk> existingChunks = chunkMapper.selectByDocumentId(documentId);
+        if (!existingChunks.isEmpty()) {
+            log.info("Document already chunked: id={}, chunks={}", documentId, existingChunks.size());
+            return existingChunks.size();
+        }
+
         String text = loadDocumentText(document);
 
         if (text == null || text.isEmpty()) {

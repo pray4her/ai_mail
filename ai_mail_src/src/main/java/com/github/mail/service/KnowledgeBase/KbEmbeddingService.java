@@ -101,7 +101,7 @@ public class KbEmbeddingService {
                 .filter(c -> !existingIds.contains(c.getId()))
                 .toList();
         if (pendingChunks.isEmpty()) {
-            return 0;
+            return chunks.size();
         }
 
         int successCount = batchEmbedChunks(pendingChunks);
@@ -117,7 +117,7 @@ public class KbEmbeddingService {
                     documentId, successCount, pendingChunks.size());
         }
 
-        return successCount;
+        return existingIds.size() + successCount;
     }
 
 

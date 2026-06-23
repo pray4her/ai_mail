@@ -1,0 +1,42 @@
+package com.github.mail.service.KnowledgeBase;
+
+public record KbDocumentLifecycleResult(
+        KbDocumentLifecycleOutcome outcome,
+        Long documentId,
+        KbDocumentLifecycleStatus status,
+        int chunkCount,
+        int embeddedCount,
+        String message
+) {
+    public static KbDocumentLifecycleResult success(
+            Long documentId,
+            KbDocumentLifecycleStatus status,
+            int chunkCount,
+            int embeddedCount,
+            String message
+    ) {
+        return new KbDocumentLifecycleResult(
+                KbDocumentLifecycleOutcome.SUCCESS,
+                documentId,
+                status,
+                chunkCount,
+                embeddedCount,
+                message
+        );
+    }
+
+    public static KbDocumentLifecycleResult failure(
+            Long documentId,
+            KbDocumentLifecycleStatus status,
+            String message
+    ) {
+        return new KbDocumentLifecycleResult(
+                KbDocumentLifecycleOutcome.RETRYABLE_FAILURE,
+                documentId,
+                status,
+                0,
+                0,
+                message
+        );
+    }
+}

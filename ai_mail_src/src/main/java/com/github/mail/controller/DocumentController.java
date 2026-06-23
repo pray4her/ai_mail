@@ -5,8 +5,9 @@ import com.github.mail.repo.KbDocument.domain.KbDocument;
 import com.github.mail.repo.KbDocument.dto.DocumentDTO;
 import com.github.mail.repo.KbDocument.dto.PageResponse;
 import com.github.mail.repo.KbDocument.dto.QueryParams;
+import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleResult;
+import com.github.mail.service.KnowledgeBase.KbDocumentLifecycleService;
 import com.github.mail.service.KnowledgeBase.KbDocumentService;
-import com.github.mail.service.Schedule.ProcessingScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.InputStreamResource;
@@ -41,7 +42,7 @@ public class DocumentController {
 
     private final ObjectMapper objectMapper;
 
-    private final ProcessingScheduler scheduler;
+    private final KbDocumentLifecycleService lifecycleService;
 
     /**
      * 分页查询文档
@@ -84,18 +85,14 @@ public class DocumentController {
                         .body(Map.of("message", "文件不能为空"));
             }
 
-            List<String> tags = List.of(objectMapper.readValue(tagsJson, String[].class));
+            List<String> tags = parseTags(tagsJson);
 
-            // 上传文档
-            DocumentDTO result = kbDocumentService.uploadDocument(file, author, tags);
-
-            //调用文档解析
-            scheduler.parseKbDocumentList();
+            KbDocumentLifecycleResult result = lifecycleService.uploadAndProcess(file, author, tags);
 
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("message", "文档上传成功");
+            response.put("message", result.message());
             response.put("data", result);
 
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
@@ -118,11 +115,11 @@ public class DocumentController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> deleteDocument(@PathVariable Long id) {
         try {
-            kbDocumentService.deleteDocument(id);
+            KbDocumentLifecycleResult result = lifecycleService.deleteDocument(id);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("message", "文档删除成功");
+            response.put("message", result.message());
 
             return ResponseEntity.ok(response);
 
@@ -169,6 +166,13 @@ public class DocumentController {
             log.error("文档下载失败: {}", id, e);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
+    }
+
+    private List<String> parseTags(String tagsJson) throws IOException {
+        if (tagsJson == null || tagsJson.isBlank()) {
+            return List.of();
+        }
+        return List.of(objectMapper.readValue(tagsJson, String[].class));
     }
 
 }
