@@ -11,7 +11,7 @@ This repository is a Java 17 Spring Boot backend for AI-assisted mail replies. T
 - `client/`: vendor SDK clients that still remain necessary, such as Bailian knowledge-base retrieval, MinIO, or other non-Spring-AI integrations. Do not add new vendor-specific chat or embedding clients when Spring AI can cover the use case.
 - `config/`, `config/properties/`, `model/config/`, `utils/`: Spring configuration, typed properties, config models, and helpers.
 
-Tests live in `ai_mail_src/src/test/java/com/github/mail`. Primary runtime configuration is `ai_mail_src/src/main/resources/application.yml`, with secrets and deployment-specific values supplied via environment variables. SQL references are in `mail.sql` and `schema.sql`.
+Tests live in `ai_mail_src/src/test/java/com/github/mail`. Primary runtime configuration is `ai_mail_src/src/main/resources/application.yml`, with secrets and deployment-specific values supplied via environment variables. MySQL schema changes are managed by Flyway migrations in `ai_mail_src/src/main/resources/db/migration`; `mail.sql`, `schema.sql`, and `db_upgrade_history_sync.sql` are historical references only.
 
 ## AI Architecture Expectations
 
@@ -24,6 +24,7 @@ Tests live in `ai_mail_src/src/test/java/com/github/mail`. Primary runtime confi
 ## Build, Test, and Development Commands
 
 - `mvn -f ai_mail_src/pom.xml spring-boot:run`: start the local service.
+- `mvn -f ai_mail_src/pom.xml flyway:validate flyway:migrate`: validate and apply explicit MySQL migrations.
 - `mvn -f ai_mail_src/pom.xml test`: run all JUnit/Spring Boot tests.
 - `mvn -f ai_mail_src/pom.xml clean test`: run a clean full test pass before finishing larger refactors.
 - `mvn -f ai_mail_src/pom.xml "-Dtest=com.github.mail.service.ai.SpringAiGenerationServiceTest" test`: run one focused test class.
