@@ -8,6 +8,10 @@ AI Mail helps operators prepare replies to inbound email using knowledge base co
 由 AI 根据来信及相关业务输入生成，并保存为待确认的回复内容。
 _Avoid_: 自动发送、已发送回复、AI 自动回信
 
+**草稿回复样式**:
+草稿回复在邮箱客户端中呈现时使用的受控视觉规则，包括字体、字号、颜色、行高和段落间距。
+_Avoid_: AI 生成样式、任意 CSS、邮件模板代码
+
 **来信**:
 外部联系人发到受管邮箱、可能触发草稿回复生成的邮件。
 _Avoid_: 用户邮件、查询请求
